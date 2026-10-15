@@ -71,13 +71,17 @@ node "$BRIDGE/src/cli.ts" remove --region cn         # 移除本桥接注册的 
 node "$BRIDGE/src/cli.ts" smoke --region cn --model hy3   # 真实调用一次（可能消耗积分）
 ```
 
-`install` 会写 `%USERPROFILE%\.zcode\v2\provider_config.json`（ZCode 的个人 provider
-配置）。它只增删自己那一条 provider 和它名下的 model 规则，其他 provider、`providerOrder`
-与手写规则都保持原样。
+`install` 会写 ZCode 那份个人 provider 配置：默认 `%USERPROFILE%\.zcode\v2\provider_config.json`；
+若在「设置 → 数据目录」里改过数据目录（`dataBaseDir`），则写
+`<数据目录>\.zcode\v2\provider_config.json`——**那份才是 ZCode 实际读的**，写错地方模型不会出现
+（脚本会读 `%USERPROFILE%\.zcode\v2\setting.json` 自行判断）。它只增删自己那一条 provider
+和它名下的 model 规则，其他 provider、`providerOrder` 与手写规则都保持原样；
+`ZCODE_PROVIDER_CONFIG`（绝对路径）可显式指定目标文件。
 
 ## 汇报要求
 
 - 报告桥接目录、端口、已接入区域、模型数量与免费模型 id。
+- 报告 `install` 实际写入的配置文件路径（它打在 stderr 上）。
 - 明确说明哪些检查已实测、哪些未验证（例如没做真实调用就别声称调用成功）。
 - 提醒用户重启 ZCode 后才会看到 provider。
 - 不要输出任何 token、`bridge.json` 内容或 WorkBuddy 登录文件的字段值。

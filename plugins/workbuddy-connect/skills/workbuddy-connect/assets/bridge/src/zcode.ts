@@ -2,16 +2,19 @@
  * ZCode provider registration for the loopback WorkBuddy bridge.
  *
  * ZCode has no plugin-facing provider API, so the personal provider registry is
- * edited directly: `<home>/.zcode/v2/provider_config.json`. That file is the
- * client's own personal config — the same one Settings → Models writes — and it
- * is a single strict document, so every write is a full-document atomic
- * replace that preserves unrelated providers, rules and ordering.
+ * edited directly: `<zcode home>/v2/provider_config.json`, or
+ * `<dataBaseDir>/.zcode/v2/provider_config.json` once Settings → Data directory
+ * has moved the client's data. That file is the client's own personal config —
+ * the same one Settings → Models writes — and it is a single strict document,
+ * so every write is a full-document atomic replace that preserves unrelated
+ * providers, rules and ordering.
  *
  * Only the bridge's own entries are ever touched: a provider is claimed by
  * `providerId`, and removal additionally re-checks the stored base URL and API
  * format, so a provider a user re-pointed elsewhere is left alone.
  */
 
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
@@ -107,6 +110,36 @@ export function bridgeRegionBaseUrl(bridgeUrl: string, region: ZCodeRegion): str
 }
 
 /**
+ * ZCode's state root: `ZCODE_HOME` when an absolute path is given, otherwise
+ * the default `<home>/.zcode`. The client keeps `v2/setting.json` here whatever
+ * its data directory is.
+ */
+function zcodeStateRoot(): string {
+  const home = process.env['ZCODE_HOME']?.trim()
+  return home !== undefined && home !== '' && isAbsolute(home) ? home : join(homedir(), '.zcode')
+}
+
+/**
+ * The registry inside a custom data directory, or undefined when the user has
+ * not moved one. Settings → Data directory retargets where ZCode stores data:
+ * the client then reads and writes `<dataBaseDir>/.zcode/v2/provider_config.json`
+ * and leaves the registry under the old root behind, so a write to the default
+ * path registers nothing and the model never reaches the selector.
+ */
+function dataDirectoryProviderConfigPath(root: string): string | undefined {
+  let recorded: unknown
+  try {
+    recorded = (JSON.parse(readFileSync(join(root, 'v2', 'setting.json'), 'utf8')) as JsonRecord)['dataBaseDir']
+  } catch {
+    return undefined
+  }
+  // Anything but an absolute path is not a data directory the client wrote.
+  if (typeof recorded !== 'string' || recorded.trim() === '' || !isAbsolute(recorded)) return undefined
+  const scoped = join(recorded, '.zcode', 'v2', 'provider_config.json')
+  return scoped === join(root, 'v2', 'provider_config.json') ? undefined : scoped
+}
+
+/**
  * Resolve the personal provider config. `ZCODE_PROVIDER_CONFIG` is honoured
  * only as an absolute path, so a relative value cannot silently retarget the
  * write into the current directory.
@@ -114,9 +147,8 @@ export function bridgeRegionBaseUrl(bridgeUrl: string, region: ZCodeRegion): str
 export function defaultProviderConfigPath(): string {
   const configured = process.env['ZCODE_PROVIDER_CONFIG']?.trim()
   if (configured !== undefined && configured !== '' && isAbsolute(configured)) return configured
-  const home = process.env['ZCODE_HOME']?.trim()
-  const root = home !== undefined && home !== '' && isAbsolute(home) ? home : join(homedir(), '.zcode')
-  return join(root, 'v2', 'provider_config.json')
+  const root = zcodeStateRoot()
+  return dataDirectoryProviderConfigPath(root) ?? join(root, 'v2', 'provider_config.json')
 }
 
 async function readConfig(path: string): Promise<JsonRecord> {

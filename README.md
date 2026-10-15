@@ -22,8 +22,10 @@ ZCode 的插件只能提供技能、命令、hooks 和 MCP server，**不能自�
 
 1. 一个只跑在 `127.0.0.1` 的本地桥接进程，用你自己 WorkBuddy 桌面端的登录态去访问
    WorkBuddy 的模型接口，对外提供 OpenAI Chat Completions 接口；
-2. 一个安装命令把桥接注册成 ZCode 的**自定义 provider**（写
-   `%USERPROFILE%\.zcode\v2\provider_config.json`，即 ZCode「设置 → 模型」用的那份个人配置）。
+2. 一个安装命令把桥接注册成 ZCode 的**自定义 provider**（写 ZCode 那份个人 provider 配置：
+   默认在 `%USERPROFILE%\.zcode\v2\provider_config.json`；如果在「设置 → 数据目录」里改过
+   数据目录（`dataBaseDir`），则写 `<数据目录>\.zcode\v2\provider_config.json`，即
+   ZCode「设置 → 模型」实际读的那一份）。
 
 ZCode 本身支持 `openai-chat-completions` 类型的 provider，所以不需要额外的协议转换。
 

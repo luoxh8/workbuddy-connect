@@ -138,12 +138,16 @@ export async function main(): Promise<void> {
   }
   if (command === 'install') {
     const regions = await selectedInstallRegions(regionChoice)
-    const { installZCode } = await import('./zcode.ts')
+    const { defaultProviderConfigPath, installZCode } = await import('./zcode.ts')
+    const configPath = args.values.config ?? defaultProviderConfigPath()
     console.log(JSON.stringify(await installZCode({
       bridgeUrl: baseUrl, token: config.token, regions,
       ...args.values.config === undefined ? {} : { configPath: args.values.config },
       ...args.values['free-only'] === true ? { freeOnly: true } : {},
     }), null, 2))
+    // Name the file that was edited: with a custom Settings → Data directory,
+    // the default path is not the registry the client actually reads.
+    console.error(`provider config: ${configPath}`)
     return
   }
   if (command === 'remove') {

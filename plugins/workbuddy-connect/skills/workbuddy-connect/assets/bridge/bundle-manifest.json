@@ -4,7 +4,7 @@
     "Install.cmd": "55a2f90de1fb231cbf907a9ef3049533413991ad1448f04e1c090cf3ead09a29",
     "LICENSE": "8fcc42b7f6e06eb57441e7c4fc10d45d8c138a196a1bd44b5878b53dddf7c56e",
     "NOTICE.md": "85ec426422aa4218a9f215597fa17cd51013e45c40077d7500793a0c97163630",
-    "README.md": "7ee55f2ad0b1b7af4d45a38a1dea9af1aec224736eaf41c51239042a7ea1fe4f",
+    "README.md": "6a84843fb32bae684759b469b40adc62246cc88a51c17f15eb8ef350a0743b0b",
     "Start-Bridge.cmd": "b47e40da050a76b68ca5ca49b4e1778d291f6a710ec1feabe4bd14e83b219fd4",
     "Uninstall.cmd": "962847364bcb60d4e763ec75b164bd428b6a044177fe6cfe77dfb9bff7cd3de4",
     "package.json": "fde973d4d535a9da6e536ed99a2d95c4a63ebd72412ea729b1889b2a18a48689",
@@ -16,7 +16,7 @@
     "scripts/Start-Bridge.ps1": "45fd2032c7b48eb1bfd5f199b25bec95058fcd40bb4f0b62e0d688b35ab8e139",
     "scripts/Uninstall.ps1": "c2ab6cc61fdcaf83d320afbf26d359e1674f6a631012395449abcd1eb37af7cf",
     "src/auth.ts": "e5d92964e528b1ac6a64108150c6c117e5307b59d4ddd1fd453f118402b72088",
-    "src/cli.ts": "745fdfa9ed3606429cc520d0d007d2efdfe802e32b58f32b40a7be6ea24e6202",
+    "src/cli.ts": "0af9ebbcfb2439253fbd57eb8e319f21494e75c2508cdf426c0755119c61c818",
     "src/loopback.ts": "87bfa7ad5456dc6277879295baa6f02ff89aca12d0c48a3d42ff34a1259957cf",
     "src/probe.ts": "5fc9770908ca37a72b7cb3d91b16e3836cf37611d2bf7c9e038728c553af3d85",
     "src/server.ts": "7b2c6c6dbede2a9239cf504f1fa5b47a8ab6ef91305c1c2d977fb2855ec67e1a",
@@ -24,6 +24,6 @@
     "src/storage.ts": "5838c127aaefa353d46ee864b74ccd71b8fb6b530886962b5a58ebe7c9725407",
     "src/upstream.ts": "d943cee3d408f02938c557a1f9afa806923958780bad4b8e482058594cc9b18c",
     "src/wbaes.ts": "e2322c8a0f3bf9bb7b58c3320f3fc385200f101d288cd577391c586bb6058264",
-    "src/zcode.ts": "193b5973c94dfbc5765b4a9e9c33b86f2400ad9d4c8e8e848399b1966ce50bd8"
+    "src/zcode.ts": "b38b6422132672d062c007aca399a33375834ca48660cf440ac7323055b13f93"
   }
 }

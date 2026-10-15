@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
 import { bridgeRegionBaseUrl, defaultProviderConfigPath, installZCode, providerIdFor, readZCodeRegistration, removeZCode } from '../src/zcode.ts'
@@ -266,6 +266,46 @@ test('the default config path honours ZCODE_HOME and ignores relative overrides'
     assert.equal(defaultProviderConfigPath(), join(fakeHome, 'v2', 'provider_config.json'))
     process.env.ZCODE_PROVIDER_CONFIG = join(fakeHome, 'pinned', 'config.json')
     assert.equal(defaultProviderConfigPath(), join(fakeHome, 'pinned', 'config.json'))
+  } finally {
+    if (originalHome === undefined) delete process.env.ZCODE_HOME
+    else process.env.ZCODE_HOME = originalHome
+    if (originalPath === undefined) delete process.env.ZCODE_PROVIDER_CONFIG
+    else process.env.ZCODE_PROVIDER_CONFIG = originalPath
+  }
+})
+
+test('the default config path follows a custom ZCode data directory', async t => {
+  const home = await mkdtemp(join(process.cwd(), '.test-zcode-datadir-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+  const zcodeHome = join(home, '.zcode')
+  const settings = join(zcodeHome, 'v2', 'setting.json')
+  await mkdir(join(zcodeHome, 'v2'), { recursive: true })
+  const defaultPath = join(zcodeHome, 'v2', 'provider_config.json')
+  const originalHome = process.env.ZCODE_HOME
+  const originalPath = process.env.ZCODE_PROVIDER_CONFIG
+  try {
+    delete process.env.ZCODE_PROVIDER_CONFIG
+    process.env.ZCODE_HOME = zcodeHome
+    // Settings → Data directory moved the client's data: the client reads that
+    // registry, so a write to the default path would register nothing.
+    const moved = join(home, 'codex_proj')
+    await writeFile(settings, JSON.stringify({ dataBaseDir: moved }))
+    assert.equal(defaultProviderConfigPath(), join(moved, '.zcode', 'v2', 'provider_config.json'))
+    // An explicit override still wins over the recorded data directory.
+    process.env.ZCODE_PROVIDER_CONFIG = join(home, 'pinned', 'config.json')
+    assert.equal(defaultProviderConfigPath(), join(home, 'pinned', 'config.json'))
+    delete process.env.ZCODE_PROVIDER_CONFIG
+    // A relative or empty value is not a data directory the client would write.
+    await writeFile(settings, JSON.stringify({ dataBaseDir: 'relative/dir' }))
+    assert.equal(defaultProviderConfigPath(), defaultPath)
+    await writeFile(settings, JSON.stringify({ dataBaseDir: '' }))
+    assert.equal(defaultProviderConfigPath(), defaultPath)
+    // The home root as the data directory is the default path, not a second file.
+    await writeFile(settings, JSON.stringify({ dataBaseDir: home }))
+    assert.equal(defaultProviderConfigPath(), defaultPath)
+    // No settings file at all: the registry under the default root.
+    await rm(settings)
+    assert.equal(defaultProviderConfigPath(), defaultPath)
   } finally {
     if (originalHome === undefined) delete process.env.ZCODE_HOME
     else process.env.ZCODE_HOME = originalHome
