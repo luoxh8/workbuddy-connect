@@ -4,14 +4,14 @@
   "description": "Local WorkBuddy bridge that registers your own WorkBuddy account's models (free models included) as a ZCode provider",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
+  "engines": { "node": ">=22.18.0" },
   "scripts": {
     "start": "node src/cli.ts serve",
     "status": "node src/cli.ts status",
     "accounts": "node src/cli.ts accounts",
     "models": "node src/cli.ts models --region cn",
     "install": "node src/cli.ts install --region cn",
-    "test": "node --test --test-isolation=none tests/*.test.ts",
+    "test": "node --test tests/*.test.ts",
     "build:plugin": "node scripts/build-plugin.mjs",
     "check:plugin": "node scripts/build-plugin.mjs --check"
   },

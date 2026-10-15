@@ -21,8 +21,11 @@ ZCode → 本机桥接 (127.0.0.1:10108) → 用户自己的 WorkBuddy 账号
 （本技能的文件路径在加载时已给出，取其目录再拼 `assets/bridge`）。
 下文用 `$BRIDGE` 表示该目录。
 
-需要 **Node.js 24 或更新版本**（`node --version` 校验主版本号 ≥ 24）。普通 ZCode
-桌面用户可能没有全局 `node`，先检查；缺失时停下来告诉用户去装 Node，不要自行安装。
+需要 **Node.js 22.18 或更新版本**（桥接直接跑 TypeScript）。用户 PATH 里没有 `node` 很常见，
+所以优先用 `$BRIDGE/Install.cmd` / `$BRIDGE/Start-Bridge.cmd`：它们的 PowerShell 脚本会自己找
+Node（PATH → WorkBuddy 自带运行时 `%USERPROFILE%\.workbuddy\binaries\node` → 常见安装位置）。
+只有直接调 CLI 时才需要自己定位 `node.exe`；确实找不到任何可用 Node 时，停下来让用户安装，
+不要自行安装运行时。
 
 ## 步骤
 
@@ -34,8 +37,8 @@ ZCode → 本机桥接 (127.0.0.1:10108) → 用户自己的 WorkBuddy 账号
 
    `state` 为 `signed-in` 的区域才能接入；全部 `signed-out` 时请用户先在 WorkBuddy 客户端登录。
 
-2. 启动桥接（后台、常驻）。用 `Start-Bridge.cmd` 可注册 Windows 计划任务，
-   也可以直接前台/后台跑 `serve`：
+2. 启动桥接（后台、常驻）。`Start-Bridge.cmd` 会注册 Windows 计划任务（登录后隐藏启动、
+   意外退出自动恢复）；也可以直接后台跑 `serve`：
 
    ```powershell
    node "$BRIDGE/src/cli.ts" serve --port 10108

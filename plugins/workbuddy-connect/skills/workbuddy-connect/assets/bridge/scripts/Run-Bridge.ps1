@@ -16,13 +16,10 @@ $logPath = Join-Path $resolvedState 'bridge-supervisor.log'
 if (!(Test-Path -LiteralPath $bridgeEntry -PathType Leaf)) { throw 'Bridge entrypoint is missing.' }
 New-Item -ItemType Directory -Force -Path $resolvedState | Out-Null
 
-if ([string]::IsNullOrWhiteSpace($NodePath)) {
-    $nodeCommand = Get-Command node.exe -ErrorAction Stop
-    $NodePath = $nodeCommand.Source
-}
-if (!(Test-Path -LiteralPath $NodePath -PathType Leaf)) { throw 'Configured Node.js executable does not exist.' }
-$nodeMajor = [int]((& $NodePath --version).Trim().TrimStart('v').Split('.')[0])
-if ($nodeMajor -lt 24) { throw "Node.js 24 or newer is required; found $nodeMajor." }
+. (Join-Path $PSScriptRoot 'Resolve-NodePath.ps1')
+# A scheduled task may start with a minimal environment, so resolve again
+# instead of trusting a PATH that the task never inherited.
+$NodePath = Resolve-BridgeNodePath -Explicit $NodePath
 
 # Task Scheduler can stop the wrapper without stopping its native child.
 # Reclaim only a runtime recorded by this installation whose owner is gone.

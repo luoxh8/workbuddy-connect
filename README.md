@@ -30,8 +30,13 @@ ZCode 本身支持 `openai-chat-completions` 类型的 provider，所以不需�
 ## 前置条件
 
 - **Windows 10/11**（一键安装与后台常驻脚本面向 Windows）。
-- **[Node.js 24 或更高版本](https://nodejs.org/en/download)**，装完重开终端。
 - 已安装并登录 **WorkBuddy 国内版或国际版**（要两边模型就分别登录两边）。
+- 桥接直接跑 TypeScript，需要 **Node.js 22.18 或更新版本**：
+  - PATH 里有 `node` 就直接用；
+  - 没有的话，脚本会自动改用 **WorkBuddy 自带的 Node 运行时**
+    （`%USERPROFILE%\.workbuddy\binaries\node\versions\*`），所以大多数已装 WorkBuddy 的机器
+    不需要额外安装；
+  - 也可以用 `WORKBUDDY_NODE_PATH` 或 `-NodePath` 显式指定。
 - ZCode 已安装。桥接注册后需要**重启 ZCode** 才会看到新的 provider。
 
 ## 方法一：ZCode 插件（推荐）
@@ -151,10 +156,12 @@ provider 和 WorkBuddy 桌面登录。删插件只需在 ZCode 的插件管理�
 ## 开发
 
 ```powershell
-npm test                # 单元测试（不访问真实 WorkBuddy 账号）
+npm test                # 单元测试（37 个，不访问真实 WorkBuddy 账号）
 npm run build:plugin    # 把运行时代码同步进插件自包含目录
 npm run check:plugin    # 校验插件内副本与源码一致
 ```
+
+`npm test` 与 `npm run check:plugin` 需要 Node 24 或更新；桥接本身只要 22.18。
 
 Windows 后台托管回归检查（会创建并删除独立的测试计划任务，不调用模型）：
 

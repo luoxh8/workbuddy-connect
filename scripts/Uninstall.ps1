@@ -5,8 +5,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $sourceRoot = Split-Path -Parent $PSScriptRoot
 $resolvedState = [IO.Path]::GetFullPath($StateDir)
-$node = Get-Command node.exe -ErrorAction Stop
-& $node.Source (Join-Path $sourceRoot 'src\cli.ts') remove --state-dir $resolvedState --region $Region
+. (Join-Path $PSScriptRoot 'Resolve-NodePath.ps1')
+$nodePath = Resolve-BridgeNodePath
+& $nodePath (Join-Path $sourceRoot 'src\cli.ts') remove --state-dir $resolvedState --region $Region
 $removeExit = $LASTEXITCODE
 if ($removeExit -eq 2) { throw 'Provider removal was skipped because a provider is not owned by this bridge. The bridge and startup shortcut remain unchanged.' }
 if ($removeExit -ne 0) { throw 'Provider removal failed; bridge and startup shortcut remain unchanged.' }

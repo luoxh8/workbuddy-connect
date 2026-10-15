@@ -255,14 +255,17 @@ test('a short bridge token is refused before any write', async t => {
 test('the default config path honours ZCODE_HOME and ignores relative overrides', () => {
   const originalHome = process.env.ZCODE_HOME
   const originalPath = process.env.ZCODE_PROVIDER_CONFIG
+  // Absolute on every platform the suite runs on: the resolver rejects a
+  // relative override precisely because it would retarget the write.
+  const fakeHome = process.platform === 'win32' ? 'C:\\custom-zcode' : '/tmp/custom-zcode'
   try {
     delete process.env.ZCODE_PROVIDER_CONFIG
-    process.env.ZCODE_HOME = 'C:\\custom-zcode'
-    assert.equal(defaultProviderConfigPath(), join('C:\\custom-zcode', 'v2', 'provider_config.json'))
+    process.env.ZCODE_HOME = fakeHome
+    assert.equal(defaultProviderConfigPath(), join(fakeHome, 'v2', 'provider_config.json'))
     process.env.ZCODE_PROVIDER_CONFIG = 'relative/config.json'
-    assert.equal(defaultProviderConfigPath(), join('C:\\custom-zcode', 'v2', 'provider_config.json'))
-    process.env.ZCODE_PROVIDER_CONFIG = 'C:\\pinned\\config.json'
-    assert.equal(defaultProviderConfigPath(), 'C:\\pinned\\config.json')
+    assert.equal(defaultProviderConfigPath(), join(fakeHome, 'v2', 'provider_config.json'))
+    process.env.ZCODE_PROVIDER_CONFIG = join(fakeHome, 'pinned', 'config.json')
+    assert.equal(defaultProviderConfigPath(), join(fakeHome, 'pinned', 'config.json'))
   } finally {
     if (originalHome === undefined) delete process.env.ZCODE_HOME
     else process.env.ZCODE_HOME = originalHome

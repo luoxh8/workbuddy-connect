@@ -17,11 +17,8 @@ $taskMetadata = Join-Path $resolvedState 'bridge-task.json'
 if (!(Test-Path -LiteralPath $runScript -PathType Leaf) -or !(Test-Path -LiteralPath $bridgeEntry -PathType Leaf)) {
     throw 'Bridge task scripts or entrypoint are missing.'
 }
-if ([string]::IsNullOrWhiteSpace($NodePath)) { $NodePath = (Get-Command node.exe -ErrorAction Stop).Source }
-$NodePath = [IO.Path]::GetFullPath($NodePath)
-if (!(Test-Path -LiteralPath $NodePath -PathType Leaf)) { throw 'Configured Node.js executable does not exist.' }
-$nodeMajor = [int]((& $NodePath --version).Trim().TrimStart('v').Split('.')[0])
-if ($nodeMajor -lt 24) { throw "Node.js 24 or newer is required; found $nodeMajor." }
+. (Join-Path $PSScriptRoot 'Resolve-NodePath.ps1')
+$NodePath = Resolve-BridgeNodePath -Explicit $NodePath
 New-Item -ItemType Directory -Force -Path $resolvedState | Out-Null
 
 # An established state directory owns its selected port unless the caller
