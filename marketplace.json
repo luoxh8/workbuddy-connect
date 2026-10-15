@@ -1,0 +1,17 @@
+{
+  "name": "zcode-workbuddy-connect",
+  "description": "把本机 WorkBuddy 账号（国内版 / 国际版）的模型接入 ZCode —— 含 WorkBuddy 的免费模型。",
+  "owner": { "name": "glunsan" },
+  "plugins": [
+    {
+      "name": "workbuddy-connect",
+      "source": "./plugins/workbuddy-connect",
+      "version": "1.0.0",
+      "description": "Local WorkBuddy bridge: registers your own WorkBuddy account's models (free models included) as a ZCode provider.",
+      "displayName": "WorkBuddy Connect",
+      "displayName_i18n": { "zh-CN": "WorkBuddy 接入" },
+      "description_i18n": { "zh-CN": "把本机已登录的 WorkBuddy 账号模型（含免费模型）接入 ZCode，安装后由 /workbuddy-connect 一键完成。" },
+      "category": "utilities"
+    }
+  ]
+}

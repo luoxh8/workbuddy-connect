@@ -1,0 +1,14 @@
+node_modules/
+.state/
+*.log
+bridge.json
+runtime.json
+bridge-task.json
+*-auth.json
+backups/
+.test-*/
+*.zip
+*.tgz
+__pycache__/
+.env
+.env.*
