@@ -1,6 +1,6 @@
 {
   "name": "workbuddy-connect",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account's models (free ones included) into an OpenAI-compatible endpoint any client can use",
   "type": "module",
   "bin": {

@@ -4,7 +4,8 @@ import { once } from 'node:events'
 import { hostIsLoopback, originIsLoopback } from './loopback.ts'
 import { prepareChatBody, normalizeCredits, WorkBuddyUpstreamClient, type WorkBuddyUpstreamModel, type WorkBuddyRegion } from './upstream.ts'
 import { CompletionAccumulator, readSse } from './sse.ts'
-import { packageVersion } from './version.ts'
+import { packageName, packageVersion } from './version.ts'
+import { shapeChatBody, shapeOptionsFromEnv, type ShapeOptions } from './shape.ts'
 
 export type Region = WorkBuddyRegion
 export interface RegionStore {
@@ -18,6 +19,8 @@ export interface BridgeOptions {
   stores: Record<Region, RegionStore>
   client?: Pick<WorkBuddyUpstreamClient, 'fetchModels' | 'chatStream' | 'fetchCredits'>
   timeoutMs?: number
+  /** 请求体整形参数；默认读 WORKBUDDY_SHAPE_* 环境变量。 */
+  shape?: ShapeOptions
 }
 const errorStatus = { hard_credit: 402, soft_rate: 429, session_dead: 401, not_found: 404, server: 502, client: 400 }
 const MAX_BODY = 64 * 1024 * 1024
@@ -56,6 +59,8 @@ function modelRow(region: Region, model: WorkBuddyUpstreamModel) {
 export function createBridge(options: BridgeOptions) {
   if (options.token.length < 24) throw new Error('Bridge token must contain at least 24 characters')
   const client = options.client ?? new WorkBuddyUpstreamClient()
+  const shapeOptions = options.shape ?? shapeOptionsFromEnv()
+  const shapeStats = { requests: 0, images: 0, duplicated: 0, shaped: 0, dropped: 0, bytesIn: 0, bytesOut: 0 }
   const cache = new Map<Region, { identity: string; at: number; models: readonly WorkBuddyUpstreamModel[] }>()
   const loads = new Map<string, Promise<readonly WorkBuddyUpstreamModel[]>>()
   async function models(region: Region, credential: any) {
@@ -101,7 +106,16 @@ export function createBridge(options: BridgeOptions) {
           const status = await options.stores[region].status()
           return [region, { state: status.state, domain: status.domain, expiresAtMs: status.expiresAtMs }]
         })))
-        json(res, 200, { regions }); return
+        json(res, 200, {
+          regions,
+          shape: {
+            ...shapeStats,
+            maxBytes: shapeOptions.maxBytes,
+            maxImages: shapeOptions.maxImages,
+            imageMaxDim: shapeOptions.imageMaxDim,
+            shrinker: shapeOptions.ffmpeg === undefined ? 'none' : 'ffmpeg',
+          },
+        }); return
       }
       const match = /^\/(cn|global)\/v1\/(models|chat\/completions|credits)$/.exec(path)
       if (!match) { fail(res, 404, 'not_found', 'Unknown bridge route'); return }
@@ -148,6 +162,20 @@ export function createBridge(options: BridgeOptions) {
       // unknown Codex default must not break an otherwise supported model.
       if (body.reasoning_effort && !model.reasoning?.supportedEfforts?.includes(body.reasoning_effort)) delete body.reasoning_effort
       body.max_tokens = Math.min(body.max_tokens ?? model.maxTokens, model.maxTokens)
+      // 图片去重 / 缩图 / 超预算丢最旧的图；其余字段原样转发。
+      const shaped = await shapeChatBody(body, shapeOptions)
+      if (shaped.images > 0) {
+        shapeStats.requests += 1
+        shapeStats.images += shaped.images
+        shapeStats.duplicated += shaped.duplicated
+        shapeStats.shaped += shaped.shaped
+        shapeStats.dropped += shaped.dropped
+        shapeStats.bytesIn += shaped.bytesIn
+        shapeStats.bytesOut += shaped.bytesOut
+      }
+      if (shaped.overBudget) {
+        fail(res, 413, 'request_too_large', `Request is ${shaped.bytesOut} bytes after local image shaping, over this bridge's ${shapeOptions.maxBytes}-byte budget; send fewer images or raise WORKBUDDY_SHAPE_MAX_BYTES`); return
+      }
       const result = await client.chatStream(credential, prepareChatBody(JSON.stringify(body)), controller.signal)
       if (!result.ok) {
         fail(res, errorStatus[result.kind], result.kind, `WorkBuddy ${region} rejected the request (${result.kind}, HTTP ${result.status})`); return

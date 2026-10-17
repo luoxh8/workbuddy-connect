@@ -25,10 +25,10 @@ const textChunks = [
   { id: 'chat-1', model: 'sample', choices: [{ index: 0, delta: { content: '你好' }, finish_reason: null }] },
   { id: 'chat-1', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 } },
 ]
-async function fixture(t: any, chatStream?: any) {
+async function fixture(t: any, chatStream?: any, catalog: any[] = [model]) {
   const seen: any[] = []
   const bridge = createBridge({ port: 0, token, stores, client: {
-    async fetchModels(c) { seen.push({ catalogRegion: c.domain }); return [model] },
+    async fetchModels(c) { seen.push({ catalogRegion: c.domain }); return catalog },
     async fetchCredits() { return { total: 0, accounts: [] } },
     chatStream: chatStream ?? (async (c, body, signal) => {
       assert.equal(signal.aborted, false, 'a fully read request must not abort upstream')
@@ -135,4 +135,30 @@ test('healthz reports the package version instead of a hardcoded one', async t =
   const body = await (await fetch(`${url}/healthz`, { headers })).json()
   assert.equal(body.service, 'workbuddy-connect')
   assert.equal(body.version, packageVersion())
+})
+
+test('duplicate images are collapsed before reaching upstream and counted in /status', async t => {
+  const vision = { ...model, id: 'vision', supportsImages: true }
+  const { url, seen } = await fixture(t, undefined, [vision])
+  const image = 'data:image/png;base64,' + Buffer.from('same-bytes').toString('base64')
+  const body = { model: 'vision', messages: [
+    { role: 'user', content: [{ type: 'text', text: 'first' }, { type: 'image_url', image_url: { url: image } }] },
+    { role: 'assistant', content: 'ok' },
+    { role: 'user', content: [{ type: 'text', text: 'again' }, { type: 'image_url', image_url: { url: image } }] },
+  ] }
+  const response = await fetch(`${url}/cn/v1/chat/completions`, { method: 'POST', headers, body: JSON.stringify(body) })
+  assert.equal(response.status, 200)
+
+  const forwarded = seen.at(-1).body
+  const images = forwarded.messages.flatMap((message: any) => Array.isArray(message.content)
+    ? message.content.filter((part: any) => part.type === 'image_url')
+    : [])
+  assert.equal(images.length, 1, 'only the newest copy of the same image is forwarded')
+  assert.equal(forwarded.messages[2].content[1].image_url.url, image)
+  assert.match(forwarded.messages[0].content[1].text, /identical image repeated earlier/)
+
+  const status = await (await fetch(`${url}/status`, { headers })).json()
+  assert.equal(status.shape.requests, 1)
+  assert.equal(status.shape.images, 2)
+  assert.equal(status.shape.duplicated, 1)
 })

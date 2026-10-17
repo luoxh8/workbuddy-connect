@@ -151,6 +151,48 @@ WorkBuddy 5.6.2+ 把 token 存成 `{"$wbEncrypted":1,...}` 的 AES-GCM 信封。
   不覆盖 ZCode 或 WorkBuddy 的登录文件。
 - 运行目录含私密数据，**不要打包给别人或提交 Git**。本仓库、插件和发布包不含任何凭据。
 
+## 大请求体自动整形（图片去重 / 缩图 / 超限丢弃）
+
+客户端（Codex、带视觉的会话等）每轮都会把整段对话连同里面的 base64 图片重新发一遍。
+图片按 token 计很小，永远不会触发上下文压缩，但**字节数只涨不跌**，迟早撞上上游的请求体上限，
+之后每一轮都 `413`，会话看起来就"假死"了。
+
+桥在转发前只动图片这一件事，其余字段（文本、`tools`、采样参数……）一律原样转发：
+
+| 层 | 做什么 | 触发条件 |
+|---|---|---|
+| 1. 去重 | 同一张图在历史里出现多次时，只保留**最新**那份，更旧的换成一行文字占位 | 请求里存在 `data:` 图片且内容重复 |
+| 2. 张数上限 | 只保留最新 `WORKBUDDY_SHAPE_MAX_IMAGES` 张（默认 64），更旧的换占位 | 图片数超限 |
+| 3. 缩图 | 单张超过 `WORKBUDDY_SHAPE_IMAGE_MAX` 的图用 ffmpeg 缩到长边 `DIM`、JPEG 质量 `Q` | 装了 ffmpeg |
+| 4. 预算 | 仍超 `WORKBUDDY_SHAPE_MAX_BYTES`（默认 24 MiB）时，从**最旧**的图开始继续换占位 | 整形后仍超预算 |
+
+没有图片的请求只做一次字节数比较，不会解析、不会重写。整形后仍超预算时不硬发，
+直接返回 `413 request_too_large` 并说明当前字节数与可调的环境变量。
+
+ffmpeg 优先取 `WORKBUDDY_SHAPE_FFMPEG`，否则用 PATH 上的 `ffmpeg`；两者都没有时
+第 3 层自动跳过，去重与丢弃照常生效（请求不会因为缺 ffmpeg 而失败）。
+
+观察整形效果（`status` 里就有，`shape.shrinker` 是 `ffmpeg` 还是 `none` 一眼可见）：
+
+```powershell
+node src/cli.ts status
+#   "shape": { "requests": 3, "images": 12, "duplicated": 8, "shaped": 4,
+#              "dropped": 0, "bytesIn": 53480841, "bytesOut": 8023755,
+#              "shrinker": "ffmpeg", "maxBytes": 25165824, ... }
+```
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `WORKBUDDY_SHAPE_MAX_BYTES` | `25165824`（24 MiB） | 整形后的请求体预算 |
+| `WORKBUDDY_SHAPE_MAX_IMAGES` | `64` | 保留最新的 N 张图 |
+| `WORKBUDDY_SHAPE_IMAGE_DIM` | `1536` | 缩图长边上限 |
+| `WORKBUDDY_SHAPE_IMAGE_QUALITY` | `3` | ffmpeg `-q:v`，越小越清晰也越大 |
+| `WORKBUDDY_SHAPE_IMAGE_MAX` | `262144`（256 KiB） | 单张超过这个字节数才重编码 |
+| `WORKBUDDY_SHAPE_FFMPEG` | 自动探测 | ffmpeg 可执行文件路径 |
+
+> 这与 `openfilm-fix` 那个独立代理不是同一件事：那个代理服务的是 **OpenFilm → DeepSeek**
+> 这条链路（不经过本桥），本节的整形服务的是**任何客户端 → 本桥 → WorkBuddy**。两者互不替代。
+
 ## 常见问题
 
 **只有国内版，可以安装吗？** 可以。默认只注册检测到登录的区域；之后登录另一区域再跑一次安装。

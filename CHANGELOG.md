@@ -2,6 +2,22 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.2.0] - 2026-10-18
+
+### Added
+
+- **内置大请求体整形**（`src/shape.ts`），把原先单独的 `openfilm-fix` 代理那套思路搬进桥：
+  - 同一张图在历史里重复出现时只保留最新一份（客户端每轮重发整段对话，图片会一路累积）；
+  - 超过张数上限时丢最旧的图；
+  - 偏大的图用 ffmpeg 缩到 1536px JPEG（`-q:v 3`）；
+  - 仍超预算（默认 24 MiB）时从最旧的图继续换占位，实在不行返回 `413 request_too_large`
+    并说明当前字节数。
+  其余字段一律原样转发；没有图片的请求只做一次字节比较。
+- `/status` 新增 `shape` 段：`requests / images / duplicated / shaped / dropped / bytesIn / bytesOut / shrinker`。
+- `WORKBUDDY_SHAPE_MAX_BYTES` / `_MAX_IMAGES` / `_IMAGE_DIM` / `_IMAGE_QUALITY` / `_IMAGE_MAX` / `_FFMPEG`
+  六个环境变量（README 有表）。
+- 测试 44 → 55：去重、张数上限、预算丢弃、无图请求零改动、无 ffmpeg 时降级、真实图片经 ffmpeg 缩图、桥端到端去重与计数。
+
 ## [1.1.0] - 2026-10-18
 
 ### Added
