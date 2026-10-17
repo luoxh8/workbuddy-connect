@@ -1,5 +1,9 @@
 # WorkBuddy Connect
 
+[![npm](https://img.shields.io/npm/v/workbuddy-connect.svg)](https://www.npmjs.com/package/workbuddy-connect)
+[![license](https://img.shields.io/npm/l/workbuddy-connect.svg)](LICENSE)
+[![node](https://img.shields.io/node/v/workbuddy-connect.svg)](package.json)
+
 把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型，变成一个本机 OpenAI 兼容接口 —— 免费模型（`hy3`、`step-5-preview` 等）也在内。
 两个区域可以任选一个，也可以同时使用。
 
@@ -94,6 +98,8 @@ workbuddy-connect serve                 # 前台跑桥接（默认 127.0.0.1:101
 ## 日常使用
 
 ```powershell
+node src/cli.ts --help                           # 全部命令与参数
+node src/cli.ts --version                        # 版本（取自 package.json）
 node src/cli.ts accounts                          # 只读检查桌面登录状态
 node src/cli.ts status                            # 桥接与各区域状态
 node src/cli.ts models --region cn                # 模型目录（含免费标记，不消耗积分）
@@ -101,6 +107,9 @@ node src/cli.ts install --region cn               # 注册/刷新（可重复运
 node src/cli.ts install --region cn --free-only   # 只注册免费模型
 node src/cli.ts remove --region cn                # 只移除本桥接注册的 provider
 ```
+
+装成 npm 包之后换成 `workbuddy-connect <command>` 即可，参数完全一致。
+`serve` 是前台运行；`status` 是默认命令，不给命令直接跑就是它。
 
 `install` 可以重复运行以同步可用模型、上下文窗口、图像输入和上游声明的推理档位；
 模型目录缓存最长 5 分钟。它只增删自己那一条 provider 和它名下的 model 规则，
@@ -137,7 +146,8 @@ WorkBuddy 5.6.2+ 把 token 存成 `{"$wbEncrypted":1,...}` 的 AES-GCM 信封。
 - 桥接绑定 `127.0.0.1`，校验 Bearer、Host 和浏览器 Origin。
 - 对话内容与 access token 只发给对应的 WorkBuddy 服务；refresh token 只用于刷新接口。
 - 区域、账号和企业身份隔离；退出或切换桌面账号后不会复用旧账号缓存。
-- 刷新缓存只写在桥接自己的状态目录（默认 `%USERPROFILE%\.zcode\workbuddy-connect`），
+- 刷新缓存只写在桥接自己的状态目录（默认 `%USERPROFILE%\.workbuddy-connect`，
+  老版本在 `%USERPROFILE%\.zcode\workbuddy-connect`，首次运行会自动迁移过去以保住密钥），
   不覆盖 ZCode 或 WorkBuddy 的登录文件。
 - 运行目录含私密数据，**不要打包给别人或提交 Git**。本仓库、插件和发布包不含任何凭据。
 
@@ -146,6 +156,15 @@ WorkBuddy 5.6.2+ 把 token 存成 `{"$wbEncrypted":1,...}` 的 AES-GCM 信封。
 **只有国内版，可以安装吗？** 可以。默认只注册检测到登录的区域；之后登录另一区域再跑一次安装。
 
 **ZCode 里看不到新 provider？** 重启 ZCode。写配置不会热更新到已经打开的会话。
+
+**提示 "Bridge is not running at http://127.0.0.1:10108"？** 桥接进程没起来（或已经退出）。
+双击 `Start-Bridge.cmd`，或跑 `node src/cli.ts serve`；装过的话也可以重启计划任务
+（`schtasks /run /tn WorkBuddyConnectBridge`）。这条提示出现在 `status` / `models` / `install` /
+`smoke` 任何一个命令里，都是同一个原因。
+
+**提示 "No bridge state in ..."？** 这台机器还没生成过桥接状态（第一次运行）。先跑一次
+`node src/cli.ts serve` 或安装脚本，它会在 `%USERPROFILE%\.workbuddy-connect` 建 `bridge.json`
+（内含本地 Bearer 密钥与端口），之后其它命令才有东西可读。
 
 **端口占用？** 首次安装可传 `-Port`。已有桥接在运行时不要起第二份副本；用原来的项目目录更新或先卸载。
 
@@ -169,11 +188,16 @@ provider 和 WorkBuddy 桌面登录。删插件只需在 ZCode 的插件管理�
 
 ## 开发
 
+变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 ```powershell
-npm test                # 单元测试（37 个，不访问真实 WorkBuddy 账号）
-npm run build:plugin    # 把运行时代码同步进插件自包含目录
+npm test                # 单元测试（44 个，不访问真实 WorkBuddy 账号）
+npm run build:plugin    # 把运行时代码同步进插件自包含目录（改版本号后必须跑）
 npm run check:plugin    # 校验插件内副本与源码一致
 ```
+
+版本号只有一个来源：`package.json` 的 `version`。`/healthz` 和 `--version` 都读它
+（`src/version.ts`），所以不会出现"包里写 1.0.1、接口还报 1.0.0"这种漂移。
 
 `npm test` 与 `npm run check:plugin` 需要 Node 24 或更新；桥接本身只要 22.18。
 

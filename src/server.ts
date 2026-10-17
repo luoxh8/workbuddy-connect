@@ -4,6 +4,7 @@ import { once } from 'node:events'
 import { hostIsLoopback, originIsLoopback } from './loopback.ts'
 import { prepareChatBody, normalizeCredits, WorkBuddyUpstreamClient, type WorkBuddyUpstreamModel, type WorkBuddyRegion } from './upstream.ts'
 import { CompletionAccumulator, readSse } from './sse.ts'
+import { packageVersion } from './version.ts'
 
 export type Region = WorkBuddyRegion
 export interface RegionStore {
@@ -93,7 +94,7 @@ export function createBridge(options: BridgeOptions) {
       }
       const path = new URL(req.url ?? '/', 'http://127.0.0.1').pathname.replace(/\/$/, '')
       if (req.method === 'GET' && path === '/healthz') {
-        json(res, 200, { ok: true, service: 'workbuddy-connect', version: '1.0.0' }); return
+        json(res, 200, { ok: true, service: 'workbuddy-connect', version: packageVersion() }); return
       }
       if (req.method === 'GET' && path === '/status') {
         const regions = Object.fromEntries(await Promise.all((['cn', 'global'] as const).map(async region => {

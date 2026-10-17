@@ -1,6 +1,6 @@
 {
   "name": "workbuddy-connect",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account's models (free ones included) into an OpenAI-compatible endpoint any client can use",
   "type": "module",
   "bin": {
@@ -14,7 +14,8 @@
     "marketplace.json",
     "README.md",
     "NOTICE.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22.18.0"
@@ -35,7 +36,9 @@
     "bridge",
     "dsh",
     "deepseek-harness",
-    "zcode"
+    "zcode",
+    "cli",
+    "openai"
   ],
   "author": {
     "name": "luoxh8"
@@ -48,5 +51,8 @@
   "homepage": "https://github.com/luoxh8/workbuddy-connect#readme",
   "bugs": {
     "url": "https://github.com/luoxh8/workbuddy-connect/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

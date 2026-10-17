@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
 import { homedir } from 'node:os'
-import { resolve, join } from 'node:path'
+import { resolve, join, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync, renameSync } from 'node:fs'
@@ -10,6 +10,7 @@ import { RegionCredentialStore } from './auth.ts'
 import { WorkBuddyUpstreamClient } from './upstream.ts'
 import { createBridge, type Region } from './server.ts'
 import { writeJsonAtomic } from './storage.ts'
+import { packageName, packageVersion } from './version.ts'
 import type { ZCodeRemoveReport } from './zcode.ts'
 
 export type RegionChoice = 'auto' | 'cn' | 'global' | 'both'
@@ -40,15 +41,63 @@ export function defaultStateDir(): string {
   return next
 }
 
+/**
+ * 命令行里显示的程序名。
+ * - npm 安装后：argv[1] 是包内的 `bin/cli.mjs`（basename 只剩 `cli`），此时用包名；
+ * - 仓库里直跑：`node src/cli.ts`，因为 `cli.ts` 不是可执行文件名。
+ */
+export function programName(argv1: string | undefined = process.argv[1], moduleUrl: string = import.meta.url): string {
+  const name = argv1 === undefined ? '' : basename(argv1).replace(/\.(?:mjs|cjs|js|ts)$/i, '')
+  if (name !== '' && name !== 'cli') return name
+  if (/[\\/]node_modules[\\/]/.test(moduleUrl)) return packageName()
+  return 'node src/cli.ts'
+}
+
+export function usage(program = programName()): string {
+  return [
+    `Usage: ${program} <command> [options]`,
+    '',
+    'Commands:',
+    '  serve                 run the bridge in the foreground (127.0.0.1:10108)',
+    '  status                bridge health + region sign-in state (default command)',
+    '  accounts              read-only WorkBuddy desktop login state',
+    '  models                model catalog for a region, with billing badges',
+    '  install               register/refresh this bridge as a ZCode provider',
+    '  remove                remove only the provider entries this bridge added',
+    '  smoke                 one real chat call through the bridge (spends credits)',
+    '',
+    'Options:',
+    '  --region <auto|cn|global|both>   which region to touch (default: auto)',
+    '  --model <id>                     required by smoke',
+    '  --prompt <text>                  smoke prompt (default: a fixed ping)',
+    '  --state-dir <path>               bridge home (default: ~/.workbuddy-connect)',
+    '  --port <1024-65535>              bridge port (default: 10108)',
+    '  --config <path>                  ZCode provider config to edit',
+    '  --free-only                      install: register only free (x0.00) models',
+    '  -h, --help                       this text',
+    '  -v, --version                    print the version',
+  ].join('\n')
+}
+
 function initializeArguments(): void {
-  args = parseArgs({ allowPositionals: true, options: {
-    'state-dir': { type: 'string' }, port: { type: 'string' }, region: { type: 'string' },
-    model: { type: 'string' }, prompt: { type: 'string' }, config: { type: 'string' },
-    'free-only': { type: 'boolean' },
-  } })
+  try {
+    args = parseArgs({ allowPositionals: true, options: {
+      'state-dir': { type: 'string' }, port: { type: 'string' }, region: { type: 'string' },
+      model: { type: 'string' }, prompt: { type: 'string' }, config: { type: 'string' },
+      'free-only': { type: 'boolean' },
+      help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
+    } })
+  } catch (error: any) {
+    throw new Error(`${error.message}\nRun ${programName()} --help for usage`)
+  }
   command = args.positionals[0] ?? 'status'
   stateDir = resolve(args.values['state-dir'] ?? process.env.WORKBUDDY_BRIDGE_HOME ?? defaultStateDir())
   stateFile = join(stateDir, 'bridge.json')
+}
+
+/** auto/both 展开成两个区域，其余原样成单元素数组。 */
+export function regionsOf(choice: RegionChoice): Region[] {
+  return choice === 'auto' || choice === 'both' ? ['cn', 'global'] : [choice]
 }
 
 export function parseRegionChoice(value: string | undefined): RegionChoice {
@@ -63,6 +112,13 @@ export function signedInRegions(status: Record<Region, { state?: unknown }>): Re
 
 export function removalIsBlocked(reports: readonly ZCodeRemoveReport[]): boolean {
   return reports.some(report => report.action === 'skipped' && report.reason === 'not_owned')
+}
+
+/** 连接被拒 = 桥没在跑（本机端口不会出现 DNS/TLS 这类失败）。 */
+export function bridgeIsDown(error: any): boolean {
+  const code = error?.cause?.code ?? error?.code
+  if (code === 'ECONNREFUSED') return true
+  return /ECONNREFUSED|fetch failed|connect ECONNREFUSED/i.test(String(error?.message ?? ''))
 }
 
 function portFromArgs(): number | undefined {
@@ -113,10 +169,9 @@ async function selectedInstallRegions(choice: RegionChoice): Promise<Region[]> {
 
 export async function main(): Promise<void> {
   initializeArguments()
-  if (command === 'help') {
-    console.log('node src/cli.ts <serve|status|accounts|models|install|remove|smoke> [--state-dir PATH] [--port 10108] [--region auto|cn|global|both] [--model ID] [--config PATH] [--free-only]')
-    return
-  }
+  const program = programName()
+  if (args.values.version === true) { console.log(packageVersion()); return }
+  if (args.values.help === true || command === 'help') { console.log(usage(program)); return }
   if (command === 'accounts') {
     const stores = storesFor(stateDir)
     const regions = await Promise.all((['cn', 'global'] as const).map(async region => {
@@ -126,12 +181,29 @@ export async function main(): Promise<void> {
     console.log(JSON.stringify({ regions }, null, 2))
     return
   }
-  const config = await state(command === 'serve')
+  let config: State
+  try {
+    config = await state(command === 'serve')
+  } catch (error: any) {
+    // 全新机器上先跑 status/install 时，状态文件还不存在：给出"先起一次桥"的动作提示。
+    if (error?.code === 'ENOENT') throw new Error(`No bridge state in ${stateDir} yet. Start the bridge once with ${program} serve (or run the installer), then retry.`)
+    throw error
+  }
   const baseUrl = `http://127.0.0.1:${config.port}`
   const headers = { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' }
   const regionChoice = parseRegionChoice(args.values.region)
   const request = async (path: string, init: RequestInit = {}) => {
-    const response = await fetch(`${baseUrl}${path}`, { ...init, headers, signal: AbortSignal.timeout(command === 'smoke' ? 180_000 : 60_000) })
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl}${path}`, { ...init, headers, signal: AbortSignal.timeout(command === 'smoke' ? 180_000 : 60_000) })
+    } catch (error: any) {
+      // 桥没起来是最常见的失败：fetch 只会给一句 "fetch failed"，这里换成能照做的提示。
+      if (bridgeIsDown(error)) {
+        const start = program === 'node src/cli.ts' ? 'node src/cli.ts serve' : `${program} serve`
+        throw new Error(`Bridge is not running at ${baseUrl}. Start it with "${start}" (or scripts\\Start-Bridge.ps1), then retry.`)
+      }
+      throw error
+    }
     const body = await response.json().catch(() => undefined) as any
     if (!response.ok) throw new Error(`Bridge HTTP ${response.status}: ${body?.error?.message ?? 'request failed'}`)
     return body
@@ -149,8 +221,7 @@ export async function main(): Promise<void> {
     console.log(JSON.stringify({ ...(await request('/healthz')), ...(await request('/status')) }, null, 2)); return
   }
   if (command === 'models') {
-    const regions: Region[] = regionChoice === 'auto' || regionChoice === 'both' ? ['cn', 'global'] : [regionChoice]
-    for (const region of regions) {
+    for (const region of regionsOf(regionChoice)) {
       try { console.log(JSON.stringify({ region, ...(await request(`/${region}/v1/models`)) }, null, 2)) }
       catch (error: any) { console.log(JSON.stringify({ region, error: error.message })); process.exitCode = 1 }
     }
@@ -171,10 +242,9 @@ export async function main(): Promise<void> {
     return
   }
   if (command === 'remove') {
-    const regions: Region[] = regionChoice === 'auto' || regionChoice === 'both' ? ['cn', 'global'] : [regionChoice]
     const { removeZCode } = await import('./zcode.ts')
     const reports = await removeZCode({
-      bridgeUrl: baseUrl, regions,
+      bridgeUrl: baseUrl, regions: regionsOf(regionChoice),
       ...args.values.config === undefined ? {} : { configPath: args.values.config },
     })
     console.log(JSON.stringify(reports, null, 2))
@@ -189,7 +259,7 @@ export async function main(): Promise<void> {
     console.log(JSON.stringify({ region: regionChoice, model: args.values.model, text: body.choices?.[0]?.message?.content, finish_reason: body.choices?.[0]?.finish_reason, usage: body.usage }, null, 2))
     return
   }
-  throw new Error(`Unknown command: ${command}`)
+  throw new Error(`Unknown command: ${command}\nRun ${program} --help for usage`)
 }
 
 const invokedPath = process.argv[1] === undefined ? undefined : pathToFileURL(resolve(process.argv[1])).href

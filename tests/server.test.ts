@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createBridge } from '../src/server.ts'
 import { prepareChatBody, regionOf } from '../src/upstream.ts'
+import { packageVersion } from '../src/version.ts'
 
 const token = 'test-local-token-abcdefghijklmnopqrstuvwxyz'
 const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
@@ -39,8 +40,7 @@ async function fixture(t: any, chatStream?: any) {
   t.after(() => bridge.close())
   return { url, seen }
 }
-test('separate regions, authentication, browser origin gate and model metadata', async t => {
-  const { url, seen } = await fixture(t)
+test('separate regions, authentication, browser origin gate and model metadata', async t => {  const { url, seen } = await fixture(t)
   assert.equal((await fetch(`${url}/healthz`)).status, 401)
   assert.equal((await fetch(`${url}/healthz`, { headers: { ...headers, Origin: 'https://example.com' } })).status, 403)
   for (const region of ['cn', 'global']) {
@@ -128,4 +128,11 @@ test('normalization retains tool results and reasoning history; domains select i
   assert.equal(out.tools, undefined)
   assert.equal(regionOf('www.workbuddy.ai'), 'global')
   assert.equal(regionOf('www.codebuddy.cn'), 'cn')
+})
+
+test('healthz reports the package version instead of a hardcoded one', async t => {
+  const { url } = await fixture(t)
+  const body = await (await fetch(`${url}/healthz`, { headers })).json()
+  assert.equal(body.service, 'workbuddy-connect')
+  assert.equal(body.version, packageVersion())
 })
