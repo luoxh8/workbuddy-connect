@@ -1,14 +1,15 @@
-# ZCode WorkBuddy Connect
+# WorkBuddy Connect
 
-把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型接入 **ZCode**，包括 WorkBuddy 的免费模型。
+把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型，变成一个本机 OpenAI 兼容接口 —— 免费模型（`hy3`、`step-5-preview` 等）也在内。
 两个区域可以任选一个，也可以同时使用。
 
-Windows 一键安装 · ZCode 插件 · 本地桥接 · 零 npm 运行依赖
+**不绑定 ZCode**：桥对外就是标准的 OpenAI Chat Completions + `/models`，任何客户端都能接
+（ZCode 用自带的 `openai-chat-completions` provider；DSH 用内置 `llm-pi-ai` 指向桥；其它工具填 baseURL + key 即可）。
 
 ```text
-ZCode → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
-         ├─ WorkBuddy CN/模型名称
-         └─ WorkBuddy Global/模型名称
+任意客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
+              ├─ WorkBuddy CN/模型名称
+              └─ WorkBuddy Global/模型名称
 ```
 
 **消耗的是你自己 WorkBuddy 账号的积分。** 免费模型（倍率 `x0.00`，例如 `hy3`、`step-5-preview`）
@@ -17,17 +18,16 @@ ZCode → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy �
 
 ## 为什么需要桥接
 
-ZCode 的插件只能提供技能、命令、hooks 和 MCP server，**不能自己注册模型 provider**。
+WorkBuddy 桌面端把模型藏在它自己的登录态后面，客户端拿不到可直接调用的 API。
 所以本项目的做法是：
 
 1. 一个只跑在 `127.0.0.1` 的本地桥接进程，用你自己 WorkBuddy 桌面端的登录态去访问
-   WorkBuddy 的模型接口，对外提供 OpenAI Chat Completions 接口；
-2. 一个安装命令把桥接注册成 ZCode 的**自定义 provider**（写 ZCode 那份个人 provider 配置：
-   默认在 `%USERPROFILE%\.zcode\v2\provider_config.json`；如果在「设置 → 数据目录」里改过
-   数据目录（`dataBaseDir`），则写 `<数据目录>\.zcode\v2\provider_config.json`，即
-   ZCode「设置 → 模型」实际读的那一份）。
+   WorkBuddy 的模型接口，对外提供 **OpenAI Chat Completions**（`/v1/models`、`/v1/chat/completions`）；
+2. 一个可选的安装命令，把桥接注册成 **ZCode 的自定义 provider**（写 ZCode 那份个人 provider 配置：
+   默认在 `%USERPROFILE%\.zcode\v2\provider_config.json`；改过数据目录则写
+   `<数据目录>\.zcode\v2\provider_config.json`）。其它客户端不需要这一步，直接填地址和 key。
 
-ZCode 本身支持 `openai-chat-completions` 类型的 provider，所以不需要额外的协议转换。
+桥自身零 npm 运行依赖，只需要 Node.js 跑 TypeScript。
 
 ## 前置条件
 
@@ -44,8 +44,8 @@ ZCode 本身支持 `openai-chat-completions` 类型的 provider，所以不需�
 ## 方法一：ZCode 插件（推荐）
 
 1. 在 ZCode 里打开 **插件市场 → 添加 → 添加插件市场**，填入本仓库地址：
-   `https://github.com/luoxh8/zcode-workbuddy-connect`
-2. 在 **个人 → zcode-workbuddy-connect → workbuddy-connect → 安装**。
+   `https://github.com/luoxh8/workbuddy-connect`
+2. 在 **个人 → workbuddy-connect → workbuddy-connect → 安装**。
 3. 新开一个会话，发送：
 
    ```text

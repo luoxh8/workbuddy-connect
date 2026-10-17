@@ -1,5 +1,5 @@
 {
-  "name": "zcode-workbuddy-connect",
+  "name": "workbuddy-connect",
   "description": "把本机 WorkBuddy 账号（国内版 / 国际版）的模型接入 ZCode —— 含 WorkBuddy 的免费模型。",
   "owner": { "name": "glunsan" },
   "plugins": [

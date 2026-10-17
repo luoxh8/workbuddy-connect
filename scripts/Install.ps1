@@ -1,7 +1,7 @@
 param(
     [ValidateSet('auto', 'cn', 'global', 'both')][string]$Region = 'auto',
     [ValidateRange(1024, 65535)][int]$Port = 10108,
-    [string]$StateDir = (Join-Path $env:USERPROFILE '.zcode\workbuddy-connect'),
+    [string]$StateDir = (Join-Path $env:USERPROFILE '.workbuddy-connect'),
     [switch]$FreeOnly,
     [switch]$NoAutoStart,
     [string]$NodePath

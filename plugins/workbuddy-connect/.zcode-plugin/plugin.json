@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "把本机已登录的 WorkBuddy 账号模型（含免费模型）接入 ZCode：本地桥接 + 一键注册 provider。",
   "author": { "name": "glunsan" },
-  "homepage": "https://github.com/luoxh8/zcode-workbuddy-connect",
+  "homepage": "https://github.com/luoxh8/workbuddy-connect",
   "license": "MIT",
   "skills": "./skills",
   "commands": "./commands"

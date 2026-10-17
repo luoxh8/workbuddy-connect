@@ -41,7 +41,7 @@ try {
             if ([int]$after.pid -eq $firstPid) { continue }
             $state = Get-Content -LiteralPath (Join-Path $testState 'bridge.json') -Raw | ConvertFrom-Json
             $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/healthz" -Headers @{Authorization = "Bearer $($state.token)"} -TimeoutSec 2
-            if ($health.service -eq 'zcode-workbuddy-connect') { $recovered = $true; break }
+            if ($health.service -eq 'workbuddy-connect') { $recovered = $true; break }
         } catch {}
     }
     if (!$recovered) { throw 'Bridge did not recover automatically within 80 seconds after Scheduled Task stop' }

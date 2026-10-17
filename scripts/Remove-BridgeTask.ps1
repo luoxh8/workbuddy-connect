@@ -1,5 +1,5 @@
 param(
-    [string]$StateDir = (Join-Path $env:USERPROFILE '.zcode\workbuddy-connect')
+    [string]$StateDir = (Join-Path $env:USERPROFILE '.workbuddy-connect')
 )
 
 $ErrorActionPreference = 'Stop'

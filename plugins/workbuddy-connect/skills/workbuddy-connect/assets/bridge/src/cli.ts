@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { existsSync, renameSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { RegionCredentialStore } from './auth.ts'
 import { WorkBuddyUpstreamClient } from './upstream.ts'
@@ -20,6 +21,25 @@ let command: string
 let stateDir: string
 let stateFile: string
 
+/**
+ * Default bridge home. `~/.workbuddy-connect` is the product's own location;
+ * older installs kept their token and port under `~/.zcode/workbuddy-connect`,
+ * so migrate that directory once (rename keeps the token, which is what every
+ * already-registered client uses) and fall back to it if the rename is blocked.
+ */
+export function defaultStateDir(): string {
+  const next = join(homedir(), '.workbuddy-connect')
+  const legacy = join(homedir(), '.zcode', 'workbuddy-connect')
+  if (!existsSync(next) && existsSync(legacy)) {
+    try {
+      renameSync(legacy, next)
+    } catch {
+      return legacy
+    }
+  }
+  return next
+}
+
 function initializeArguments(): void {
   args = parseArgs({ allowPositionals: true, options: {
     'state-dir': { type: 'string' }, port: { type: 'string' }, region: { type: 'string' },
@@ -27,7 +47,7 @@ function initializeArguments(): void {
     'free-only': { type: 'boolean' },
   } })
   command = args.positionals[0] ?? 'status'
-  stateDir = resolve(args.values['state-dir'] ?? process.env.WORKBUDDY_BRIDGE_HOME ?? join(homedir(), '.zcode', 'workbuddy-connect'))
+  stateDir = resolve(args.values['state-dir'] ?? process.env.WORKBUDDY_BRIDGE_HOME ?? defaultStateDir())
   stateFile = join(stateDir, 'bridge.json')
 }
 
@@ -121,7 +141,7 @@ export async function main(): Promise<void> {
     const bridge = createBridge({ token: config.token, port: config.port, stores, client: new WorkBuddyUpstreamClient() })
     const url = await bridge.listen()
     await writeJsonAtomic(join(stateDir, 'runtime.json'), { pid: process.pid, url, startedAt: new Date().toISOString() })
-    console.log(JSON.stringify({ service: 'zcode-workbuddy-connect', url, pid: process.pid }))
+    console.log(JSON.stringify({ service: 'workbuddy-connect', url, pid: process.pid }))
     for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void bridge.close().then(() => process.exit(0)) })
     return
   }

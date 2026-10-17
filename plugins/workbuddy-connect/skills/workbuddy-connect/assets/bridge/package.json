@@ -1,10 +1,23 @@
 {
-  "name": "zcode-workbuddy-connect",
+  "name": "workbuddy-connect",
   "version": "1.0.0",
-  "description": "Local WorkBuddy bridge that registers your own WorkBuddy account's models (free models included) as a ZCode provider",
-  "private": true,
+  "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account's models (free ones included) into an OpenAI-compatible endpoint any client can use",
   "type": "module",
-  "engines": { "node": ">=22.18.0" },
+  "bin": {
+    "workbuddy-connect": "src/cli.ts"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "plugins",
+    "marketplace.json",
+    "README.md",
+    "NOTICE.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "start": "node src/cli.ts serve",
     "status": "node src/cli.ts status",
@@ -15,6 +28,24 @@
     "build:plugin": "node scripts/build-plugin.mjs",
     "check:plugin": "node scripts/build-plugin.mjs --check"
   },
+  "keywords": [
+    "workbuddy",
+    "openai-compatible",
+    "bridge",
+    "dsh",
+    "deepseek-harness",
+    "zcode"
+  ],
+  "author": {
+    "name": "luoxh8"
+  },
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/luoxh8/zcode-workbuddy-connect.git" }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luoxh8/workbuddy-connect.git"
+  },
+  "homepage": "https://github.com/luoxh8/workbuddy-connect#readme",
+  "bugs": {
+    "url": "https://github.com/luoxh8/workbuddy-connect/issues"
+  }
 }

@@ -1,5 +1,5 @@
 param(
-    [string]$StateDir = (Join-Path $env:USERPROFILE '.zcode\workbuddy-connect'),
+    [string]$StateDir = (Join-Path $env:USERPROFILE '.workbuddy-connect'),
     [ValidateRange(1024, 65535)][int]$Port = 10108,
     [string]$NodePath,
     [switch]$NoAutoStart
@@ -128,7 +128,7 @@ for ($attempt = 0; $attempt -lt 40; $attempt++) {
         $runtime = Get-Content -LiteralPath $runtimeFile -Raw | ConvertFrom-Json
         if (!$state.token -or !$state.port -or !$runtime.pid -or !(Test-TaskOwnedRuntime -ProcessId ([int]$runtime.pid))) { continue }
         $health = Invoke-RestMethod -Uri "http://127.0.0.1:$($state.port)/healthz" -Headers @{ Authorization = "Bearer $($state.token)" } -TimeoutSec 2
-        if ($health.service -eq 'zcode-workbuddy-connect') { $ready = $true; break }
+        if ($health.service -eq 'workbuddy-connect') { $ready = $true; break }
     } catch { }
 }
 if (!$ready) { throw "Scheduled Task '$taskName' was registered but the bridge did not become healthy with this installation's runtime identity." }
