@@ -79,6 +79,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Port 
 
 **安装后请保留项目目录的位置**：Windows 计划任务指向它，移动或删除前先卸载。
 
+## 方法三：npm
+
+```bash
+npm i -g workbuddy-connect              # 或临时用：npx workbuddy-connect status
+workbuddy-connect status                # 桥接与各区域状态
+workbuddy-connect install --region cn   # 注册/刷新 provider
+workbuddy-connect serve                 # 前台跑桥接（默认 127.0.0.1:10108）
+```
+
+包内自带 .ts 类型擦除的 loader，装进 `node_modules` 也能跑（Node ≥ 22.18）；
+`npm i` 不触发任何生命周期脚本，注册 provider 必须显式跑 `workbuddy-connect install`。
+
 ## 日常使用
 
 ```powershell

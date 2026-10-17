@@ -1,12 +1,13 @@
 {
   "name": "workbuddy-connect",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account's models (free ones included) into an OpenAI-compatible endpoint any client can use",
   "type": "module",
   "bin": {
-    "workbuddy-connect": "src/cli.ts"
+    "workbuddy-connect": "bin/cli.mjs"
   },
   "files": [
+    "bin",
     "src",
     "scripts",
     "plugins",
@@ -23,10 +24,10 @@
     "status": "node src/cli.ts status",
     "accounts": "node src/cli.ts accounts",
     "models": "node src/cli.ts models --region cn",
-    "install": "node src/cli.ts install --region cn",
     "test": "node --test tests/*.test.ts",
     "build:plugin": "node scripts/build-plugin.mjs",
-    "check:plugin": "node scripts/build-plugin.mjs --check"
+    "check:plugin": "node scripts/build-plugin.mjs --check",
+    "setup": "node src/cli.ts install --region cn"
   },
   "keywords": [
     "workbuddy",

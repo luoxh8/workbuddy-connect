@@ -7,7 +7,7 @@
     "README.md": "3c0909f8478ab8c518286445cb8be1031d2bb0807c67e457073cfc8d32d8d757",
     "Start-Bridge.cmd": "b47e40da050a76b68ca5ca49b4e1778d291f6a710ec1feabe4bd14e83b219fd4",
     "Uninstall.cmd": "962847364bcb60d4e763ec75b164bd428b6a044177fe6cfe77dfb9bff7cd3de4",
-    "package.json": "b503fd7b0fae048a1b977efadc5c2cc6d0a0370e25625bd07ed84c61437341ec",
+    "package.json": "cbb829e2059054b8b66053fa93e99ecdcd373f70fc3fdf3b322f11fd85a67ec8",
     "scripts/Install-BridgeTask.ps1": "1f52e5b960b098897e761b2570552b06a238d803bd314d2bb179ca0324567fed",
     "scripts/Install.ps1": "06b6329ebfacb595bca83f7659169ad851a3e118cbb70a3c2ec67192e2ca0797",
     "scripts/Remove-BridgeTask.ps1": "071617aa745efe26160c6e738fd36f0f82948a8e152d5af3a5508ad1423ae4aa",
