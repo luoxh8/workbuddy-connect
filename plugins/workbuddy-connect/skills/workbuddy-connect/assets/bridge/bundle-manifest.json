@@ -16,7 +16,7 @@
     "scripts/Start-Bridge.ps1": "eac2aff3cd23e6da6867775a0fdf47940e63d817b64ddf0ecc8f17317e0b9845",
     "scripts/Uninstall.ps1": "278adc5402a1c15f75d602a55f7142c70dba76dab94fd991b53bdbcc6717652e",
     "src/auth.ts": "e5d92964e528b1ac6a64108150c6c117e5307b59d4ddd1fd453f118402b72088",
-    "src/cli.ts": "f82ea03dbe44c363cabd9e08847917c46d76ba4c2f9d52cd5df065e3097320ed",
+    "src/cli.ts": "578bd00cb699763c8cb6b5efaab1e9c89a79dc10e4112db2fa81dd28adab075c",
     "src/loopback.ts": "87bfa7ad5456dc6277879295baa6f02ff89aca12d0c48a3d42ff34a1259957cf",
     "src/probe.ts": "5fc9770908ca37a72b7cb3d91b16e3836cf37611d2bf7c9e038728c553af3d85",
     "src/server.ts": "c00629e50fb36cee8b59ff232812d90f145c5d61165f9b9dca9b43f7d61eaf58",

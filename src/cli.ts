@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
 import { homedir } from 'node:os'
-import { resolve, join, basename } from 'node:path'
+import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync, renameSync } from 'node:fs'
@@ -47,7 +47,10 @@ export function defaultStateDir(): string {
  * - 仓库里直跑：`node src/cli.ts`，因为 `cli.ts` 不是可执行文件名。
  */
 export function programName(argv1: string | undefined = process.argv[1], moduleUrl: string = import.meta.url): string {
-  const name = argv1 === undefined ? '' : basename(argv1).replace(/\.(?:mjs|cjs|js|ts)$/i, '')
+  // 两种分隔符都认：Windows 路径可能在 Linux 上出现在 argv 里（测试、CI 日志），
+  // 而 path.basename 只认当前平台的分隔符。
+  const segments = (argv1 ?? '').replace(/\\/g, '/').split('/')
+  const name = (segments.pop() ?? '').replace(/\.(?:mjs|cjs|js|ts)$/i, '')
   if (name !== '' && name !== 'cli') return name
   if (/[\\/]node_modules[\\/]/.test(moduleUrl)) return packageName()
   return 'node src/cli.ts'
