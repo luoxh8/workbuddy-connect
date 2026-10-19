@@ -11,9 +11,11 @@ import { WorkBuddyUpstreamClient } from './upstream.ts'
 import { createBridge, type Region } from './server.ts'
 import { writeJsonAtomic } from './storage.ts'
 import { packageName, packageVersion } from './version.ts'
-import type { ZCodeRemoveReport } from './zcode.ts'
+import type { ZCodeProtocol, ZCodeRemoveReport } from './zcode.ts'
 
 export type RegionChoice = 'auto' | 'cn' | 'global' | 'both'
+/** `all` is the default: every protocol the bridge serves. */
+export type ProtocolChoice = 'all' | ZCodeProtocol
 export type State = { version: 1; token: string; port: number }
 
 type ParsedArgs = ReturnType<typeof parseArgs>
@@ -67,10 +69,13 @@ export function usage(program = programName()): string {
     '  models                model catalog for a region, with billing badges',
     '  install               register/refresh this bridge as a ZCode provider',
     '  remove                remove only the provider entries this bridge added',
-    '  smoke                 one real chat call through the bridge (spends credits)',
+    '  smoke                 one real chat call through the bridge (spends credits).',
+    '                        Requires --region cn|global --model ID --protocol <p>',
     '',
     'Options:',
     '  --region <auto|cn|global|both>   which region to touch (default: auto)',
+    '  --protocol <all|chat|anthropic|responses>',
+    '                                   wire protocol to register (default: all)',
     '  --model <id>                     required by smoke',
     '  --prompt <text>                  smoke prompt (default: a fixed ping)',
     '  --state-dir <path>               bridge home (default: ~/.workbuddy-connect)',
@@ -86,6 +91,7 @@ function initializeArguments(): void {
   try {
     args = parseArgs({ allowPositionals: true, options: {
       'state-dir': { type: 'string' }, port: { type: 'string' }, region: { type: 'string' },
+      protocol: { type: 'string' },
       model: { type: 'string' }, prompt: { type: 'string' }, config: { type: 'string' },
       'free-only': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
@@ -96,6 +102,18 @@ function initializeArguments(): void {
   command = args.positionals[0] ?? 'status'
   stateDir = resolve(args.values['state-dir'] ?? process.env.WORKBUDDY_BRIDGE_HOME ?? defaultStateDir())
   stateFile = join(stateDir, 'bridge.json')
+}
+
+/** `all` (the default) expands to every protocol the bridge serves. */
+export function parseProtocolChoice(value: string | undefined): ProtocolChoice {
+  const choice = value ?? 'all'
+  if (choice === 'all' || choice === 'chat' || choice === 'anthropic' || choice === 'responses') return choice
+  throw new Error('Protocol must be all, chat, anthropic, or responses')
+}
+
+/** Protocols an install/remove should touch; undefined means "every one". */
+export function protocolsOf(choice: ProtocolChoice): ZCodeProtocol[] | undefined {
+  return choice === 'all' ? undefined : [choice]
 }
 
 /** auto/both 展开成两个区域，其余原样成单元素数组。 */
@@ -198,7 +216,11 @@ export async function main(): Promise<void> {
   const request = async (path: string, init: RequestInit = {}) => {
     let response: Response
     try {
-      response = await fetch(`${baseUrl}${path}`, { ...init, headers, signal: AbortSignal.timeout(command === 'smoke' ? 180_000 : 60_000) })
+      response = await fetch(`${baseUrl}${path}`, {
+        ...init,
+        headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
+        signal: AbortSignal.timeout(command === 'smoke' ? 180_000 : 60_000),
+      })
     } catch (error: any) {
       // 桥没起来是最常见的失败：fetch 只会给一句 "fetch failed"，这里换成能照做的提示。
       if (bridgeIsDown(error)) {
@@ -232,10 +254,12 @@ export async function main(): Promise<void> {
   }
   if (command === 'install') {
     const regions = await selectedInstallRegions(regionChoice)
+    const protocolChoice = parseProtocolChoice(args.values.protocol)
     const { defaultProviderConfigPath, installZCode } = await import('./zcode.ts')
     const configPath = args.values.config ?? defaultProviderConfigPath()
     console.log(JSON.stringify(await installZCode({
       bridgeUrl: baseUrl, token: config.token, regions,
+      ...protocolsOf(protocolChoice) === undefined ? {} : { protocols: protocolsOf(protocolChoice) },
       ...args.values.config === undefined ? {} : { configPath: args.values.config },
       ...args.values['free-only'] === true ? { freeOnly: true } : {},
     }), null, 2))
@@ -246,8 +270,10 @@ export async function main(): Promise<void> {
   }
   if (command === 'remove') {
     const { removeZCode } = await import('./zcode.ts')
+    const protocolChoice = parseProtocolChoice(args.values.protocol)
     const reports = await removeZCode({
       bridgeUrl: baseUrl, regions: regionsOf(regionChoice),
+      ...protocolsOf(protocolChoice) === undefined ? {} : { protocols: protocolsOf(protocolChoice) },
       ...args.values.config === undefined ? {} : { configPath: args.values.config },
     })
     console.log(JSON.stringify(reports, null, 2))
@@ -256,10 +282,14 @@ export async function main(): Promise<void> {
   }
   if (command === 'smoke') {
     if ((regionChoice !== 'cn' && regionChoice !== 'global') || !args.values.model) throw new Error('smoke requires --region cn|global --model ID')
-    const body = await request(`/${regionChoice}/v1/chat/completions`, {
-      method: 'POST', body: JSON.stringify({ model: args.values.model, messages: [{ role: 'user', content: args.values.prompt ?? 'Reply exactly WORKBUDDY_OK.' }], stream: false, max_tokens: 64 }),
+    const protocolChoice = parseProtocolChoice(args.values.protocol)
+    if (protocolChoice === 'all') throw new Error('smoke requires --protocol chat|anthropic|responses')
+    const { smokeRequest, smokeBody, smokeSummary } = await import('./smoke.ts')
+    const body = await request(`/${regionChoice}/v1/${smokeRequest(protocolChoice)}`, {
+      method: 'POST', body: JSON.stringify(smokeBody(protocolChoice, args.values.model, args.values.prompt)),
+      ...(protocolChoice === 'anthropic' ? { headers: { ...headers, 'anthropic-version': '2023-06-01' } } : {}),
     })
-    console.log(JSON.stringify({ region: regionChoice, model: args.values.model, text: body.choices?.[0]?.message?.content, finish_reason: body.choices?.[0]?.finish_reason, usage: body.usage }, null, 2))
+    console.log(JSON.stringify({ region: regionChoice, protocol: protocolChoice, model: args.values.model, ...smokeSummary(protocolChoice, body) }, null, 2))
     return
   }
   throw new Error(`Unknown command: ${command}\nRun ${program} --help for usage`)

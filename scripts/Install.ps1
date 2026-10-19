@@ -1,5 +1,6 @@
 param(
     [ValidateSet('auto', 'cn', 'global', 'both')][string]$Region = 'auto',
+    [ValidateSet('all', 'chat', 'anthropic', 'responses')][string]$Protocol = 'all',
     [ValidateRange(1024, 65535)][int]$Port = 10108,
     [string]$StateDir = (Join-Path $env:USERPROFILE '.workbuddy-connect'),
     [switch]$FreeOnly,
@@ -29,11 +30,11 @@ if (Test-Path -LiteralPath $shortcutPath) {
 $startArgs = @{ StateDir = $resolvedState; NoAutoStart = $NoAutoStart; NodePath = $nodePath }
 if ($portWasSpecified) { $startArgs.Port = $Port }
 & (Join-Path $PSScriptRoot 'Install-BridgeTask.ps1') @startArgs
-$cliArgs = @((Join-Path $sourceRoot 'src\cli.ts'), 'install', '--state-dir', $resolvedState, '--region', $Region)
+$cliArgs = @((Join-Path $sourceRoot 'src\cli.ts'), 'install', '--state-dir', $resolvedState, '--region', $Region, '--protocol', $Protocol)
 if ($portWasSpecified) { $cliArgs += @('--port', $Port) }
 if ($FreeOnly) { $cliArgs += '--free-only' }
 & $nodePath @cliArgs
-if ($LASTEXITCODE -ne 0) { throw 'OpenCodex registration failed. The managed bridge remains available for diagnosis.' }
+if ($LASTEXITCODE -ne 0) { throw 'WorkBuddy provider registration failed. The managed bridge remains available for diagnosis.' }
 if (Test-Path -LiteralPath $shortcutPath) {
     Remove-Item -LiteralPath $shortcutPath
 }

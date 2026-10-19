@@ -162,3 +162,99 @@ test('duplicate images are collapsed before reaching upstream and counted in /st
   assert.equal(status.shape.images, 2)
   assert.equal(status.shape.duplicated, 1)
 })
+
+test('the anthropic route accepts x-api-key and answers with a Messages body', async t => {
+  const { url, seen } = await fixture(t)
+  const response = await fetch(`${url}/cn/v1/messages`, {
+    method: 'POST',
+    headers: { 'x-api-key': token, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'sample', max_tokens: 32,
+      system: 'be brief',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+      output_config: { effort: 'high' },
+    }),
+  })
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.type, 'message')
+  assert.equal(body.role, 'assistant')
+  assert.deepEqual(body.content, [{ type: 'text', text: '你好' }])
+  assert.equal(body.stop_reason, 'end_turn')
+  const sent = seen.find(row => row.body).body
+  assert.deepEqual(sent.messages[0], { role: 'system', content: 'be brief' })
+  assert.equal(sent.messages[1].role, 'user')
+  assert.equal(sent.max_tokens, 32)
+  assert.equal(sent.reasoning_effort, undefined, 'an undeclared effort is not forwarded')
+})
+
+test('the anthropic route streams Messages events instead of chat chunks', async t => {
+  const { url } = await fixture(t)
+  const response = await fetch(`${url}/cn/v1/messages`, {
+    method: 'POST',
+    headers: { 'x-api-key': token, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'sample', max_tokens: 32, stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+  })
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/)
+  const text = await response.text()
+  assert.match(text, /event: message_start/)
+  assert.match(text, /event: content_block_delta/)
+  assert.match(text, /event: message_stop/)
+  assert.doesNotMatch(text, /\[DONE\]/, 'chat-completions sentinels must not leak into Messages streams')
+})
+
+test('the responses route maps input to messages and answers with a Responses object', async t => {
+  const { url, seen } = await fixture(t)
+  const response = await fetch(`${url}/cn/v1/responses`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ model: 'sample', input: 'ping', instructions: 'be brief', max_output_tokens: 24, reasoning: { effort: 'high' } }),
+  })
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.object, 'response')
+  const message = body.output.find((item: any) => item.type === 'message')
+  assert.equal(message.content[0].text, '你好')
+  assert.deepEqual(message.content[0].annotations, [])
+  const sent = seen.find(row => row.body).body
+  assert.deepEqual(sent.messages[0], { role: 'system', content: 'be brief' })
+  assert.deepEqual(sent.messages[1], { role: 'user', content: 'ping' })
+  assert.equal(sent.max_tokens, 24)
+})
+
+test('the responses route streams Responses events', async t => {
+  const { url } = await fixture(t)
+  const response = await fetch(`${url}/cn/v1/responses`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ model: 'sample', input: 'hi', stream: true }),
+  })
+  const text = await response.text()
+  assert.match(text, /event: response\.created/)
+  assert.match(text, /event: response\.output_text\.delta/)
+  assert.match(text, /event: response\.completed/)
+})
+
+test('protocol errors use each protocol own error envelope', async t => {
+  const { url } = await fixture(t)
+  const anthropic = await fetch(`${url}/cn/v1/messages`, {
+    method: 'POST', headers: { 'x-api-key': token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'missing', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] }),
+  })
+  assert.equal(anthropic.status, 404)
+  const anthropicBody = await anthropic.json()
+  assert.equal(anthropicBody.type, 'error')
+  assert.equal(anthropicBody.error.type, 'not_found_error')
+
+  const responses = await fetch(`${url}/cn/v1/responses`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ model: 'missing', input: 'x' }),
+  })
+  assert.equal(responses.status, 404)
+  assert.equal((await responses.json()).error.type, 'not_found_error')
+})
+
+test('status advertises the protocols this bridge serves', async t => {
+  const { url } = await fixture(t)
+  const body = await (await fetch(`${url}/status`, { headers })).json()
+  assert.deepEqual(body.protocols, ['openai-chat-completions', 'anthropic-messages', 'openai-responses'])
+})

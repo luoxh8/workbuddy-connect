@@ -4,11 +4,19 @@
 [![license](https://img.shields.io/npm/l/workbuddy-connect.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/workbuddy-connect.svg)](package.json)
 
-把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型，变成一个本机 OpenAI 兼容接口 —— 免费模型（`hy3`、`step-5-preview` 等）也在内。
+把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型，变成一个本机多协议接口 —— 免费模型（`hy3`、`step-5-preview` 等）也在内。
 两个区域可以任选一个，也可以同时使用。
 
-**不绑定 ZCode**：桥对外就是标准的 OpenAI Chat Completions + `/models`，任何客户端都能接
-（ZCode 用自带的 `openai-chat-completions` provider；DSH 用内置 `llm-pi-ai` 指向桥；其它工具填 baseURL + key 即可）。
+**不绑定 ZCode**：桥同时提供三种协议，同一份地址、三条路径，客户端用哪种都行：
+
+| 协议 | 路径（以 `cn` 为例） | 认证头 |
+|---|---|---|
+| OpenAI Chat Completions | `POST /cn/v1/chat/completions` | `Authorization: Bearer <key>` |
+| Anthropic Messages | `POST /cn/v1/messages` | `x-api-key: <key>` 或 `Authorization: Bearer <key>` |
+| OpenAI Responses | `POST /cn/v1/responses` | `Authorization: Bearer <key>` |
+
+三种协议共享同一个 `GET /cn/v1/models`、同一个端口、同一份区域凭据；向上游实际只发一种
+Chat Completions 请求，另两种协议在桥接内部双向翻译（请求改写 + 流式事件重编码）。
 
 ```text
 任意客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
@@ -26,10 +34,12 @@ WorkBuddy 桌面端把模型藏在它自己的登录态后面，客户端拿不�
 所以本项目的做法是：
 
 1. 一个只跑在 `127.0.0.1` 的本地桥接进程，用你自己 WorkBuddy 桌面端的登录态去访问
-   WorkBuddy 的模型接口，对外提供 **OpenAI Chat Completions**（`/v1/models`、`/v1/chat/completions`）；
-2. 一个可选的安装命令，把桥接注册成 **ZCode 的自定义 provider**（写 ZCode 那份个人 provider 配置：
-   默认在 `%USERPROFILE%\.zcode\v2\provider_config.json`；改过数据目录则写
-   `<数据目录>\.zcode\v2\provider_config.json`）。其它客户端不需要这一步，直接填地址和 key。
+   WorkBuddy 的模型接口，对外提供 **OpenAI Chat Completions**、**Anthropic Messages** 与
+   **OpenAI Responses**（`/v1/models` 之外的三条路径）；
+2. 一个可选的安装命令，把桥接注册成 **ZCode 的自定义 provider**（每个区域 × 每种协议各一条，
+   ZCode 一个 provider 只能有一种 `api.type`）：默认写 `%USERPROFILE%\.zcode\v2\provider_config.json`；
+   改过数据目录则写 `<数据目录>\.zcode\v2\provider_config.json`）。其它客户端不需要这一步，
+   直接填地址和 key。
 
 桥自身零 npm 运行依赖，只需要 Node.js 跑 TypeScript。
 
@@ -66,7 +76,8 @@ WorkBuddy 桌面端把模型藏在它自己的登录态后面，客户端拿不�
 1. 把仓库克隆或下载到一个准备长期保留的目录。
 2. 双击 `Install.cmd`。它会注册 Windows 计划任务（登录后隐藏启动、意外退出自动恢复），
    然后自动识别当前已登录的区域并注册模型。
-3. 重启 ZCode，在模型选择器里找 `WorkBuddy CN` / `WorkBuddy Global`。
+3. 重启 ZCode，在模型选择器里找 `WorkBuddy CN` / `WorkBuddy Global`（Chat Completions）、
+   `WorkBuddy CN · Anthropic`、`WorkBuddy CN · Responses` 等六条（两个区域全装时）。
 
 ```powershell
 # 只接国内 / 只接国际 / 同时接两边
@@ -76,6 +87,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Regio
 
 # 只注册免费模型（倍率 x0.00）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Region cn -FreeOnly
+
+# 只注册某一种协议（默认三种都注册）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Region cn -Protocol anthropic
 
 # 换端口 / 不设置登录后自启
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Port 10109 -NoAutoStart
@@ -103,31 +117,39 @@ node src/cli.ts --version                        # 版本（取自 package.json�
 node src/cli.ts accounts                          # 只读检查桌面登录状态
 node src/cli.ts status                            # 桥接与各区域状态
 node src/cli.ts models --region cn                # 模型目录（含免费标记，不消耗积分）
-node src/cli.ts install --region cn               # 注册/刷新（可重复运行）
+node src/cli.ts install --region cn               # 注册/刷新三种协议（可重复运行）
 node src/cli.ts install --region cn --free-only   # 只注册免费模型
+node src/cli.ts install --region cn --protocol anthropic   # 只注册 Anthropic Messages
 node src/cli.ts remove --region cn                # 只移除本桥接注册的 provider
+node src/cli.ts remove --region cn --protocol responses    # 只移除 Responses 那条
 ```
 
 装成 npm 包之后换成 `workbuddy-connect <command>` 即可，参数完全一致。
 `serve` 是前台运行；`status` 是默认命令，不给命令直接跑就是它。
 
-`install` 可以重复运行以同步可用模型、上下文窗口、图像输入和上游声明的推理档位；
-模型目录缓存最长 5 分钟。它只增删自己那一条 provider 和它名下的 model 规则，
+`install` 默认给**每个区域 × 每种协议**各注册一条 provider（全装时国内 / 国际各三条）：
+Chat Completions 那条沿用历史 id `workbuddy-cn`，另两条是 `workbuddy-cn-anthropic`
+与 `workbuddy-cn-responses`。可以重复运行以同步可用模型、上下文窗口、图像输入和上游声明的推理档位；
+模型目录缓存最长 5 分钟。它只增删自己那几条 provider 和它们名下的 model 规则，
 其他 provider、`providerOrder` 和你手写的规则都保持原样。
 
 真实调用（会消耗积分，建议先用免费模型）：
 
 ```powershell
-node src/cli.ts smoke --region cn --model hy3
+node src/cli.ts smoke --region cn --model hy3 --protocol chat
+node src/cli.ts smoke --region cn --model hy3 --protocol anthropic
+node src/cli.ts smoke --region cn --model hy3 --protocol responses
 ```
 
 本地 API：
 
-- `GET /healthz`、`GET /status`
-- `GET /cn/v1/models`、`POST /cn/v1/chat/completions`
-- `GET /global/v1/models`、`POST /global/v1/chat/completions`
+- `GET /healthz`、`GET /status`（`/status` 的 `protocols` 字段列出三条协议）
+- `GET|POST /cn/v1/{models,chat/completions,messages,responses}`
+- `GET|POST /global/v1/{models,chat/completions,messages,responses}`
 
-所有接口都需要桥接自己的本地 Bearer 密钥（安装时自动生成）；不需要手工粘贴 WorkBuddy token。
+所有接口都需要桥接自己的本地密钥（安装时自动生成）：Chat Completions / Responses 用
+`Authorization: Bearer`，Anthropic Messages 用 `x-api-key`（两种头桥接都接受）。
+不需要手工粘贴 WorkBuddy token。
 
 ## 登录、数据与权限
 

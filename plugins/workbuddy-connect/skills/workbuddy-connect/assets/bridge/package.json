@@ -1,7 +1,7 @@
 {
   "name": "workbuddy-connect",
-  "version": "1.2.0",
-  "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account's models (free ones included) into an OpenAI-compatible endpoint any client can use",
+  "version": "1.3.0",
+  "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account's models (free ones included) into OpenAI Chat Completions, Anthropic Messages and OpenAI Responses endpoints any client can use",
   "type": "module",
   "bin": {
     "workbuddy-connect": "bin/cli.mjs"
@@ -33,6 +33,8 @@
   "keywords": [
     "workbuddy",
     "openai-compatible",
+    "anthropic",
+    "responses",
     "bridge",
     "dsh",
     "deepseek-harness",
