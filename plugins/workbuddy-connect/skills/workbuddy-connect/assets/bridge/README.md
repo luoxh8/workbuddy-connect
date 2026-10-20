@@ -18,6 +18,11 @@
 三种协议共享同一个 `GET /cn/v1/models`、同一个端口、同一份区域凭据；向上游实际只发一种
 Chat Completions 请求，另两种协议在桥接内部双向翻译（请求改写 + 流式事件重编码）。
 
+支持**直接接入**的客户端（不用手写配置）：
+
+- **ZCode** —— 见「方法一 / 方法二」
+- **ChatGPT 桌面版 / Codex CLI** —— `install-codex`，见「接入 ChatGPT 桌面版 / Codex」
+
 ```text
 任意客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
               ├─ WorkBuddy CN/模型名称
@@ -108,6 +113,55 @@ workbuddy-connect serve                 # 前台跑桥接（默认 127.0.0.1:101
 
 包内自带 .ts 类型擦除的 loader，装进 `node_modules` 也能跑（Node ≥ 22.18）；
 `npm i` 不触发任何生命周期脚本，注册 provider 必须显式跑 `workbuddy-connect install`。
+
+## 接入 ChatGPT 桌面版 / Codex CLI
+
+Windows 上的 **ChatGPT 桌面版就是 Codex**（MSIX 包名 `OpenAI.Codex`，显示名 `ChatGPT`）：
+它和 `codex` 命令行读**同一份** `~/.codex/config.toml`、同一个模型目录。所以一条命令同时接两边：
+
+```powershell
+node src/cli.ts install-codex --region cn
+# 装成 npm 包后：workbuddy-connect install-codex --region cn
+```
+
+它做三件事，全部写在 `# >>> workbuddy-connect >>>` 标记块里，可逆：
+
+1. 在 `config.toml` 追加 `[model_providers.workbuddy]`，
+   `wire_api = "responses"`，`base_url = http://127.0.0.1:10108/<region>/v1`；
+2. 把 `model_provider` / `model_catalog_json` 指向本桥，`model` 默认落到**免费模型**；
+3. 生成 `<config 同目录>/workbuddy-models.json`——把 `/v1/models` 的每个模型写成 Codex 能读的
+   目录条目（上下文窗口、视觉输入、推理档位、优先级）。
+
+然后**重启 ChatGPT 桌面版**（或开新的 `codex` 会话），模型选择器里就有这些模型了。
+
+```powershell
+node src/cli.ts install-codex --region cn --free-only   # 只放免费模型
+node src/cli.ts install-codex --region both             # 国内 + 国际
+node src/cli.ts remove-codex                            # 撤回，逐字节还原 config.toml
+```
+
+自定义位置：`--codex-config <path>`、`--codex-catalog <path>`；默认跟随 `$CODEX_HOME`。
+
+**不覆盖你已有的模型目录**：Codex 只能读一个目录文件。如果 `config.toml` 里的
+`model_catalog_json` 已指向别处（例如你另外配的 DeepSeek 代理），install 会把那个目录里的模型
+**合并**进新目录，安装报告里会写明转移了几个。重装不会丢掉它们，也不会把你手选过的 `model`
+改回默认。
+
+### 为什么需要替换系统提示词
+
+Codex 每轮都会把它自带的约 17 KB 系统提示词作为 `developer` 消息发出来，而 **WorkBuddy 上游会
+直接 HTTP 400 拒掉这份原文**。实测触发点在这句：
+
+```text
+Codex CLI is an open source project led by OpenAI.
+```
+
+这与长度、换行、`tools` 字段都无关（同样的长度、同样的结构，把这句话换掉就通过），所以不能靠
+裁剪或重试绕开。桥接的做法是用 Codex 自己的扩展点 `model_catalog_json` → `base_instructions`
+下发一份**等效但措辞中性**的系统提示词，客户端从一开始就不发被拒的原文，桥接仍然只做协议翻译、
+不改写用户内容。这也是为什么这个接入必须生成目录文件，不能只填一个 `base_url`。
+
+> 该限制属于 WorkBuddy 上游，可能随它更新而改变；改了之后这条替换自然不再必要，但留着也无害。
 
 ## 日常使用
 

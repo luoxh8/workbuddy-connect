@@ -69,6 +69,9 @@ export function usage(program = programName()): string {
     '  models                model catalog for a region, with billing badges',
     '  install               register/refresh this bridge as a ZCode provider',
     '  remove                remove only the provider entries this bridge added',
+    '  install-codex         register this bridge in ~/.codex/config.toml (Codex CLI',
+    '                        and the ChatGPT desktop app share that file)',
+    '  remove-codex          undo install-codex, keeping unrelated providers',
     '  smoke                 one real chat call through the bridge (spends credits).',
     '                        Requires --region cn|global --model ID --protocol <p>',
     '',
@@ -81,7 +84,11 @@ export function usage(program = programName()): string {
     '  --state-dir <path>               bridge home (default: ~/.workbuddy-connect)',
     '  --port <1024-65535>              bridge port (default: 10108)',
     '  --config <path>                  ZCode provider config to edit',
-    '  --free-only                      install: register only free (x0.00) models',
+    '  --codex-config <path>            Codex config to edit (default: $CODEX_HOME or',
+    '                                   ~/.codex/config.toml)',
+    '  --codex-catalog <path>           model catalog to write for Codex',
+    '  --free-only                      install/install-codex: register only free',
+    '                                   (x0.00) models',
     '  -h, --help                       this text',
     '  -v, --version                    print the version',
   ].join('\n')
@@ -93,6 +100,7 @@ function initializeArguments(): void {
       'state-dir': { type: 'string' }, port: { type: 'string' }, region: { type: 'string' },
       protocol: { type: 'string' },
       model: { type: 'string' }, prompt: { type: 'string' }, config: { type: 'string' },
+      'codex-config': { type: 'string' }, 'codex-catalog': { type: 'string' },
       'free-only': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
     } })
@@ -278,6 +286,31 @@ export async function main(): Promise<void> {
     })
     console.log(JSON.stringify(reports, null, 2))
     if (removalIsBlocked(reports)) process.exitCode = 2
+    return
+  }
+  if (command === 'install-codex') {
+    const regions = await selectedInstallRegions(regionChoice)
+    const { defaultCodexConfigPath, installCodex } = await import('./codex.ts')
+    const configPath = args.values['codex-config'] ?? defaultCodexConfigPath()
+    const reports = await installCodex({
+      bridgeUrl: baseUrl, token: config.token, regions,
+      ...args.values['codex-config'] === undefined ? {} : { configPath: args.values['codex-config'] },
+      ...args.values['codex-catalog'] === undefined ? {} : { catalogPath: args.values['codex-catalog'] },
+      ...args.values['free-only'] === true ? { freeOnly: true } : {},
+    })
+    console.log(JSON.stringify(reports, null, 2))
+    // Codex reads one catalog file; name it so the merge note is actionable.
+    console.error(`codex config: ${configPath}`)
+    console.error('restart the ChatGPT desktop app (or start a new codex session) to pick up the change')
+    return
+  }
+  if (command === 'remove-codex') {
+    const { removeCodex } = await import('./codex.ts')
+    const report = await removeCodex({
+      ...args.values['codex-config'] === undefined ? {} : { configPath: args.values['codex-config'] },
+      ...args.values['codex-catalog'] === undefined ? {} : { catalogPath: args.values['codex-catalog'] },
+    })
+    console.log(JSON.stringify(report, null, 2))
     return
   }
   if (command === 'smoke') {

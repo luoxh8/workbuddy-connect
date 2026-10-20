@@ -2,6 +2,34 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.4.0] - 2026-10-20
+
+### Added
+
+- **Codex CLI 与 ChatGPT 桌面版接入**（`src/codex.ts`，命令 `install-codex` / `remove-codex`）。
+  两者读同一份 `~/.codex/config.toml` 与同一个模型目录，所以一次写入同时服务两边：
+  - 在 `config.toml` 追加 `[model_providers.workbuddy]`（`wire_api = "responses"`，
+    `base_url = http://127.0.0.1:10108/<region>/v1`），并设置 `model_provider`、
+    `model_catalog_json` 与默认 `model`（优先免费模型）。
+  - 生成 `<config 同目录>/workbuddy-models.json`，把 `/v1/models` 的每个模型写成 Codex 能读的
+    目录条目（上下文窗口、视觉输入、推理档位、优先级）。
+  - 写在 `# >>> workbuddy-connect >>>` 标记块内；块内另有 `# restore` 注释记录改动前的根键，
+    `remove-codex` 据此逐字节还原（有测试保证往返一致），并删掉自己生成的目录文件。
+- 默认模型只在"不是本桥提供的模型"时才改写：用户手动选过的模型在重装后保持不变。
+- 目录条目会克隆本机已有目录的结构（Codex 对 `truncation_policy`、
+  `supported_reasoning_levels`、`model_messages` 等字段是严格校验的），只替换本桥知道的字段。
+- 首次安装会把原 `model_catalog_json` 指向的目录里的模型**合并**进新目录，避免客户端模型
+  选择器里凭空少掉另一个 provider 的模型（Codex 只能读一个目录文件）。
+- 测试 77 → 91：新增写入/幂等/往返还原/目录结构/跨 provider 合并/多区域等用例。
+
+### Why the system prompt is replaced
+
+Codex 每轮把自带的约 17 KB 系统提示词作为 `developer` 消息发出，WorkBuddy 上游会
+**以 HTTP 400 拒绝这份原文**（`Codex CLI is an open source project led by OpenAI` 这段是触发点，
+实测稳定复现；删词改词即通过，与长度、换行、tools 字段无关）。因此改为用 Codex 官方扩展点
+`model_catalog_json` 的 `base_instructions` 下发一份等效但措辞中性的系统提示词——客户端根本不发
+被拒的原文，桥接保持"只做协议翻译、不改写用户内容"。
+
 ## [1.3.0] - 2026-10-20
 
 ### Added

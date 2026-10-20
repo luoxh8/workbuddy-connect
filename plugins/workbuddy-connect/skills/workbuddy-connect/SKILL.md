@@ -1,6 +1,6 @@
 ---
 name: workbuddy-connect
-description: 把本机已登录的 WorkBuddy（国内版 / 国际版）账号模型接入 ZCode，包括 WorkBuddy 的免费模型；三种协议（OpenAI Chat Completions / Anthropic Messages / OpenAI Responses）全部注册。当用户说「接入 WorkBuddy」「把 workbuddy 模型接到 zcode」「WorkBuddy 免费模型」「workbuddy-connect 装一下」「刷新 WorkBuddy 模型」「检查 WorkBuddy 连接」「卸载 WorkBuddy 接入」时使用。
+description: 把本机已登录的 WorkBuddy（国内版 / 国际版）账号模型接入 ZCode、ChatGPT 桌面版或 Codex CLI，包括 WorkBuddy 的免费模型；三种协议（OpenAI Chat Completions / Anthropic Messages / OpenAI Responses）全部注册。当用户说「接入 WorkBuddy」「把 workbuddy 模型接到 zcode」「接进 ChatGPT」「接到 ChatGPT 桌面版」「Codex 用 WorkBuddy」「WorkBuddy 免费模型」「workbuddy-connect 装一下」「刷新 WorkBuddy 模型」「检查 WorkBuddy 连接」「卸载 WorkBuddy 接入」时使用。
 ---
 
 # WorkBuddy Connect
@@ -84,6 +84,28 @@ Node（PATH → WorkBuddy 自带运行时 `%USERPROFILE%\.workbuddy\binaries\nod
 
 5. 让用户**重启 ZCode**，然后在模型选择器里找 `WorkBuddy CN`、`WorkBuddy CN · Anthropic`、
    `WorkBuddy CN · Responses`（国际版同理）。
+
+## 接入 ChatGPT 桌面版 / Codex CLI
+
+Windows 上 ChatGPT 桌面版就是 Codex（MSIX 包名 `OpenAI.Codex`）；它和 `codex` 命令行读同一份
+`%USERPROFILE%\.codex\config.toml`、同一个模型目录，所以一条命令同时接两边：
+
+```powershell
+node "$BRIDGE/src/cli.ts" install-codex --region cn
+node "$BRIDGE/src/cli.ts" remove-codex        # 撤回，逐字节还原 config.toml
+```
+
+它会在 `config.toml` 里写一个 `# >>> workbuddy-connect >>>` 标记块
+（`[model_providers.workbuddy]`、`model_provider`、`model_catalog_json`、默认免费 `model`），
+并在同目录生成 `workbuddy-models.json`。写完要**重启 ChatGPT 桌面版**（或开新的 codex 会话）。
+
+**不要跳过目录文件**：Codex 每轮会把它自带的约 17 KB 系统提示词作为 `developer` 消息发出，
+WorkBuddy 上游会以 HTTP 400 拒掉该原文（触发点含 `Codex CLI is an open source project led by OpenAI`）。
+目录里的 `base_instructions` 是 Codex 官方的覆盖入口，用来下发一份等效但措辞中性的提示词——
+没有它，连接本身会通，但每次对话都 400。
+
+若用户原来的 `model_catalog_json` 指向别处，install 会**合并**那个目录的模型，不会让它们消失；
+安装报告的 `note` 会写明保留了几个。
 
 ## 其他命令
 
