@@ -93,8 +93,12 @@ if (Test-Path -LiteralPath $runtimeFile) {
 }
 
 # `-NoAutoStart:$true` deliberately creates an on-demand task with no trigger.
-# Autostart tasks re-enter every minute: IgnoreNew leaves a healthy wrapper
-# alone and restarts one that was killed outside Task Scheduler.
+# Autostart tasks fire once at logon. Keep-alive is covered by two layers that
+# cost nothing while healthy: Run-Bridge.ps1 restarts the node child, and the
+# task's RestartOnFailure covers the wrapper.
+# 2026-10-24: the extra one-minute repetition trigger was removed. It re-woke
+# the task every 60s only to be rejected by IgnoreNew, which wrote a
+# 0x800710E0 event per minute and made the task look perpetually busy.
 $taskArguments = @{ Action = $action; Principal = $principal; Settings = $settings }
  $existingTriggers = if ($null -ne $existing) { @($existing.Triggers | Where-Object { $null -ne $_ }) } else { @() }
 $keepOnDemand = ($PSBoundParameters.ContainsKey('NoAutoStart') -and $NoAutoStart) -or (
@@ -102,10 +106,7 @@ $keepOnDemand = ($PSBoundParameters.ContainsKey('NoAutoStart') -and $NoAutoStart
 )
 if (!$keepOnDemand) {
     $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
-    # Omit duration so the schema serializes an indefinite PT1M repetition.
-    $periodicTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Now.AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
-    $periodicTrigger.Repetition.StopAtDurationEnd = $false
-    $taskArguments['Trigger'] = @($logonTrigger, $periodicTrigger)
+    $taskArguments['Trigger'] = @($logonTrigger)
 }
 $definition = New-ScheduledTask @taskArguments
 
