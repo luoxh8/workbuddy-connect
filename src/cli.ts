@@ -67,6 +67,9 @@ export function usage(program = programName()): string {
     '  models                model catalog for a region, with billing badges',
     '  install               register/refresh this bridge as a ZCode provider',
     '  remove                remove only the provider entries this bridge added',
+    '  providers             list every provider in the ZCode registry (read-only)',
+    '  prune                 delete providers left by the retired 1.4.x three-protocol',
+    '                        layout; works without the bridge running',
     '  smoke                 one real chat call through the bridge (spends credits).',
     '                        Requires --region cn|global --model ID',
     '',
@@ -187,6 +190,26 @@ export async function main(): Promise<void> {
       return { region, state: status.state, ...(status.domain === undefined ? {} : { domain: status.domain }), ...(status.expiresAtMs === undefined ? {} : { expiresAtMs: status.expiresAtMs }) }
     }))
     console.log(JSON.stringify({ regions }, null, 2))
+    return
+  }
+  // These two only read and rewrite the ZCode registry: they must work while
+  // the bridge is stopped, which is exactly when the stale entries matter.
+  if (command === 'providers') {
+    const { defaultProviderConfigPath, listZCodeProviders } = await import('./zcode.ts')
+    const configPath = args.values.config ?? defaultProviderConfigPath()
+    const providers = await listZCodeProviders(configPath)
+    console.log(JSON.stringify({ providerConfig: configPath, providers }, null, 2))
+    return
+  }
+  if (command === 'prune') {
+    const { defaultProviderConfigPath, pruneLegacyZCode } = await import('./zcode.ts')
+    const configPath = args.values.config ?? defaultProviderConfigPath()
+    const reports = await pruneLegacyZCode({
+      regions: regionsOf(parseRegionChoice(args.values.region)),
+      ...args.values.config === undefined ? {} : { configPath: args.values.config },
+    })
+    console.log(JSON.stringify({ providerConfig: configPath, reports }, null, 2))
+    if (removalIsBlocked(reports)) process.exitCode = 2
     return
   }
   let config: State

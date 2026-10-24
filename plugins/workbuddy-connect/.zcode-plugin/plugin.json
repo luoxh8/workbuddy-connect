@@ -1,7 +1,7 @@
 {
   "name": "workbuddy-connect",
-  "version": "2.0.0",
-  "description": "°Ñ±¾»úÒÑµÇÂ¼µÄ WorkBuddy ÕËºÅÄ£ÐÍ£¨º¬Ãâ·ÑÄ£ÐÍ£©½ÓÈë ZCode£º±¾µØÇÅ½Ó + Ò»¼ü×¢²á provider¡£",
+  "version": "2.0.1",
+  "description": "ï¿½Ñ±ï¿½ï¿½ï¿½ï¿½Ñµï¿½Â¼ï¿½ï¿½ WorkBuddy ï¿½Ëºï¿½Ä£ï¿½Í£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£ï¿½Í£ï¿½ï¿½ï¿½ï¿½ï¿½ ZCodeï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å½ï¿½ + Ò»ï¿½ï¿½×¢ï¿½ï¿½ providerï¿½ï¿½",
   "author": {
     "name": "glunsan"
   },

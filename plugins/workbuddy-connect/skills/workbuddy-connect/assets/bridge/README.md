@@ -139,7 +139,22 @@ node src/cli.ts models --region cn                # 模型目录（含免费标�
 node src/cli.ts install --region cn               # 注册/刷新 provider（可重复运行）
 node src/cli.ts install --region cn --free-only   # 只注册免费模型
 node src/cli.ts remove --region cn                # 只移除本桥接注册的 provider
+node src/cli.ts providers                         # 列出 ZCode 注册表里的全部 provider（只读）
+node src/cli.ts prune                             # 删掉 1.4.x 遗留的 anthropic/responses 条目
 ```
+
+`providers` 与 `prune` **不需要桥在跑**：它们只读写 ZCode 的 provider 配置。桥停着的时候正好是
+最该检查遗留条目的时候，所以这两个命令不碰网络。
+
+```jsonc
+// node src/cli.ts providers 的输出（本机 2026-10-24 实测）
+{ "provider": "workbuddy-cn-anthropic", "apiType": "anthropic-messages",
+  "baseUrl": "http://127.0.0.1:10108/cn/v1", "retired": true }   // ← prune 会删这条
+```
+
+`prune` 只删「id 是 `workbuddy-<region>-anthropic|responses` + `api.type` 还是当初那个 +
+baseUrl 是 loopback 的同区域路径」三条同时成立的条目。用户改过格式或指向别处的同 id provider
+一律跳过并报 `not_owned`。
 
 装成 npm 包之后换成 `workbuddy-connect <command>` 即可，参数完全一致。
 `serve` 是前台运行；`status` 是默认命令，不给命令直接跑就是它。

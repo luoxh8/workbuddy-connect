@@ -22,11 +22,16 @@
 
 ### Added
 
-- **升级时自动清理**：`install` 会删掉 1.4.x 留下的 `workbuddy-<region>-anthropic` /
-  `-responses` 两条 provider 及其 model 规则，并在报告的 `cleaned` 字段里列出。
-  只有当那条 provider 的 `baseUrl` **精确等于**本桥这次写入的地址时才删——用户改到别的端口
-  或自建端点的同名 provider 一律保留。`remove` 同样会扫掉这两种遗留条目。
-- 测试 62 个（删掉协议翻译与 Codex 的用例，新增遗留清理与"用户改过就不动"的用例）。
+- **`providers` 与 `prune` 两个离线命令。** 上一版的清理只挂在 `install` 上，而 `install` 需要桥在跑
+  且账号已登录——桥停着的时候，1.4.x 留下的两条死条目就永远清不掉（它们还标着 `enabled`，
+  但指向 2.0 返回 404 的路由）。新命令只读写 ZCode 的 provider 配置，不碰网络：
+  - `providers`：列出注册表里**全部** provider（含别人的），标出哪些属于已退役布局；
+  - `prune`：只删「id 是 `workbuddy-<region>-anthropic|responses` + `api.type` 仍是当初那个 +
+    baseUrl 是 loopback 同区域路径」三条同时成立的条目，其余跳过并报 `not_owned`。
+- **升级时自动清理**：`install` 也会删掉 1.4.x 留下的这两条 provider 及其 model 规则，
+  并在报告的 `cleaned` 字段里列出。只有当那条 provider 的 `baseUrl` **精确等于**本桥这次写入的地址时
+  才删——用户改到别的端口或自建端点的同名 provider 一律保留。`remove` 同样会扫这两种遗留条目。
+- 测试 66 个（删掉协议翻译与 Codex 的用例，新增遗留清理、离线 prune 与"用户改过就不动"等用例）。
 
 ### Fixed
 

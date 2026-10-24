@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
-import { bridgeRegionBaseUrl, defaultProviderConfigPath, installZCode, providerIdFor, readZCodeRegistration, removeZCode } from '../src/zcode.ts'
+import { bridgeRegionBaseUrl, defaultProviderConfigPath, installZCode, listZCodeProviders, providerIdFor, pruneLegacyZCode, readZCodeRegistration, removeZCode } from '../src/zcode.ts'
 
 const token = 'bridge-token-abcdefghijklmnopqrstuvwxyz'
 const bridgeUrl = 'http://127.0.0.1:10108'
@@ -421,4 +421,82 @@ test('removal also sweeps the retired protocol providers', async t => {
   ])
   const written = JSON.parse(await readFile(path, 'utf8'))
   assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['deepseek'])
+})
+
+test('prune deletes the retired providers without needing a running bridge', async t => {
+  const root = await mkdtemp(join(process.cwd(), '.test-zcode-prune-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'provider_config.json')
+  await writeFile(path, legacyConfig())
+
+  // No fetch stub at all: prune must not talk to the bridge.
+  const reports = await pruneLegacyZCode({ regions: ['cn'], configPath: path })
+  assert.deepEqual(reports.map(report => [report.provider, report.action]), [
+    ['workbuddy-cn-anthropic', 'removed'],
+    ['workbuddy-cn-responses', 'removed'],
+  ])
+
+  const written = JSON.parse(await readFile(path, 'utf8'))
+  // The surviving chat-completions provider is untouched: prune only clears
+  // the retired layout, it never re-registers anything.
+  assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['deepseek', 'workbuddy-cn'])
+  assert.deepEqual(written.config.providerOrder, ['deepseek', 'workbuddy-cn'])
+  assert.deepEqual(written.config.modelConfigRules.providerModelRules.map((rule: any) => rule.providerId), [
+    'deepseek', 'workbuddy-cn',
+  ])
+})
+
+test('prune keeps a retired id the user repurposed as a different format', async t => {
+  const root = await mkdtemp(join(process.cwd(), '.test-zcode-prune-owned-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'provider_config.json')
+  const config = JSON.parse(legacyConfig())
+  // The user turned the retired entry into their own OpenAI Responses endpoint
+  // on another host: neither the format nor the region path is ours any more.
+  config.config.providerConfigRules.providerRules[2].config.api.baseUrl = 'http://127.0.0.1:8080/cn/v1'
+  config.config.providerConfigRules.providerRules[2].config.api.type = 'openai-chat-completions'
+  await writeFile(path, JSON.stringify(config, null, 2))
+
+  const reports = await pruneLegacyZCode({ regions: ['cn'], configPath: path })
+  assert.deepEqual(reports.map(report => [report.provider, report.action]), [
+    ['workbuddy-cn-anthropic', 'skipped'],
+    ['workbuddy-cn-responses', 'removed'],
+  ])
+  assert.equal(reports[0].reason, 'not_owned')
+  const written = JSON.parse(await readFile(path, 'utf8'))
+  assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), [
+    'deepseek', 'workbuddy-cn', 'workbuddy-cn-anthropic',
+  ])
+})
+
+test('prune on a clean config writes nothing and reports not_found', async t => {
+  const f = await fixture()
+  t.after(f.cleanup)
+  const reports = await pruneLegacyZCode({ regions: ['cn'], configPath: f.path })
+  assert.deepEqual(reports.map(report => [report.provider, report.action, report.reason]), [
+    ['workbuddy-cn-anthropic', 'skipped', 'not_found'],
+    ['workbuddy-cn-responses', 'skipped', 'not_found'],
+  ])
+  assert.equal(await readFile(f.path, 'utf8'), existingConfig())
+})
+
+test('providers lists every registry entry and flags the retired layout', async t => {
+  const root = await mkdtemp(join(process.cwd(), '.test-zcode-list-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'provider_config.json')
+  await writeFile(path, legacyConfig())
+
+  const providers = await listZCodeProviders(path)
+  assert.deepEqual(providers.map(entry => entry.provider), [
+    'deepseek', 'workbuddy-cn', 'workbuddy-cn-anthropic', 'workbuddy-cn-responses',
+  ])
+  assert.deepEqual(providers.map(entry => entry.retired), [false, false, true, true])
+  const chat = providers.find(entry => entry.provider === 'workbuddy-cn')
+  assert.equal(chat.apiType, 'openai-chat-completions')
+  assert.equal(chat.baseUrl, 'http://127.0.0.1:10108/cn/v1')
+  assert.equal(chat.modelRules, 1)
+  assert.equal(chat.enabled, true)
+  // An absent `enabled` flag is how the client's own rules look: enabled.
+  assert.equal(providers[0].enabled, true)
+  assert.deepEqual(await listZCodeProviders(join(root, 'absent.json')), [])
 })

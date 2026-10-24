@@ -1,6 +1,6 @@
 {
   "name": "workbuddy-connect",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account's models (free ones included) into one OpenAI Chat Completions endpoint any client can use",
   "type": "module",
   "bin": {

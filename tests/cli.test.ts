@@ -49,7 +49,7 @@ test('program name follows how the CLI was started', () => {
 
 test('usage names every command and the two universal flags', () => {
   const text = usage('workbuddy-connect')
-  for (const command of ['serve', 'status', 'accounts', 'models', 'install', 'remove', 'smoke']) {
+  for (const command of ['serve', 'status', 'accounts', 'models', 'install', 'remove', 'providers', 'prune', 'smoke']) {
     assert.match(text, new RegExp(`\\b${command}\\b`))
   }
   assert.match(text, /--help/)

@@ -62,6 +62,26 @@ export interface ZCodeRemoveReport {
   reason?: 'not_found' | 'not_owned'
 }
 
+export interface ZCodePruneReport {
+  provider: string
+  region: ZCodeRegion
+  action: 'removed' | 'skipped'
+  reason?: 'not_found' | 'not_owned'
+}
+
+/** One provider as it currently sits in the personal registry, ours or not. */
+export interface ZCodeProviderSummary {
+  provider: string
+  name: string
+  enabled: boolean
+  apiType: string
+  baseUrl: string
+  personalModels: number
+  modelRules: number
+  /** True when this id belongs to a layout this bridge version no longer writes. */
+  retired: boolean
+}
+
 type JsonRecord = Record<string, unknown>
 
 /** One model as the bridge's `/v1/models` advertises it. */
@@ -110,6 +130,18 @@ export function providerIdFor(region: ZCodeRegion): string {
 /** Identifiers the retired multi-protocol layout left behind for one region. */
 export function legacyProviderIdsFor(region: ZCodeRegion): string[] {
   return LEGACY_SUFFIXES.map(suffix => `${providerIdFor(region)}${suffix}`)
+}
+
+/**
+ * The `api.type` each retired suffix was created with. A provider whose id and
+ * type still match this signature, and whose base URL is a loopback region
+ * endpoint, was written by the 1.4.x installer and nothing else — so `prune`
+ * can recognise it without knowing which port the bridge runs on now.
+ */
+function legacyApiTypeFor(providerId: string): string | undefined {
+  if (providerId.endsWith('-anthropic')) return 'anthropic-messages'
+  if (providerId.endsWith('-responses')) return 'openai-responses'
+  return undefined
 }
 
 export function providerDisplayName(region: ZCodeRegion): string {
@@ -516,6 +548,96 @@ export async function removeZCode(options: ZCodeRemoveOptions = {}): Promise<ZCo
 
   if (!isDeepStrictEqual(before, after)) await writeJsonAtomic(configPath, after)
   return reports
+}
+
+/**
+ * Delete only the providers left by the retired multi-protocol layout.
+ *
+ * Why this exists separately from `install`: `install` needs the bridge running
+ * and an account signed in, because it fetches the live catalog. On a machine
+ * where the bridge is stopped, the three dead entries from 1.4.x would therefore
+ * sit in ZCode forever, each still `enabled` and still pointing at routes this
+ * version answers with 404. This path reads and rewrites the config offline.
+ *
+ * A retired id is removed only when it still carries the exact `api.type` the
+ * 1.4.x installer wrote for that suffix *and* its base URL is a loopback
+ * endpoint for that same region. A provider the user re-pointed to another
+ * format is theirs and stays. (A port-only edit is not distinguishable without
+ * the bridge's current port, and such an entry is dead anyway — it points at a
+ * route this version answers with 404.)
+ */
+export async function pruneLegacyZCode(options: { regions?: readonly ZCodeRegion[], configPath?: string } = {}): Promise<ZCodePruneReport[]> {
+  const regions = regionsFor(options.regions)
+  const configPath = options.configPath ?? defaultProviderConfigPath()
+  const before = await readConfig(configPath)
+  const after = structuredClone(before)
+  const body = configBody(after)
+  const providerRules = body['providerConfigRules']
+  const modelConfigRules = body['modelConfigRules']
+  if (!isRecord(providerRules) || !isRecord(modelConfigRules)) throw new Error('The ZCode provider config is not shaped like a personal provider registry')
+  const rules = rulesArray(providerRules, 'providerRules')
+  const modelRules = arraySection(modelConfigRules, 'providerModelRules')
+  const reports: ZCodePruneReport[] = []
+
+  for (const region of regions) {
+    for (const providerId of legacyProviderIdsFor(region)) {
+      const rule = rules.find(entry => isOwnProvider(entry, providerId))
+      if (!isRecord(rule)) {
+        reports.push({ provider: providerId, region, action: 'skipped', reason: 'not_found' })
+        continue
+      }
+      if (!ownsBaseUrl(rule, region, legacyApiTypeFor(providerId))) {
+        reports.push({ provider: providerId, region, action: 'skipped', reason: 'not_owned' })
+        continue
+      }
+      dropProvider(rules, modelRules, body, providerId)
+      reports.push({ provider: providerId, region, action: 'removed' })
+    }
+  }
+
+  if (!isDeepStrictEqual(before, after)) await writeJsonAtomic(configPath, after)
+  return reports
+}
+
+/**
+ * Read-only view of every provider in the personal registry, including ones
+ * this bridge never wrote. Entries whose id matches the retired layout are
+ * flagged so the caller can show what `prune` would remove.
+ */
+export async function listZCodeProviders(configPath = defaultProviderConfigPath()): Promise<ZCodeProviderSummary[]> {
+  let document: JsonRecord
+  try {
+    document = JSON.parse(await readFile(configPath, 'utf8')) as JsonRecord
+  } catch {
+    return []
+  }
+  const config = document['config']
+  if (!isRecord(config) || !isRecord(config['providerConfigRules'])) return []
+  const rules = rulesArray(config['providerConfigRules'] as JsonRecord, 'providerRules')
+  const models = isRecord(config['modelConfigRules'])
+    ? rulesArray(config['modelConfigRules'] as JsonRecord, 'providerModelRules')
+    : []
+  const summaries: ZCodeProviderSummary[] = []
+  for (const rule of rules) {
+    if (!isRecord(rule) || typeof rule['providerId'] !== 'string') continue
+    const providerId = rule['providerId']
+    const entry = isRecord(rule['config']) ? rule['config'] : {}
+    const api = isRecord(entry['api']) ? entry['api'] : {}
+    const ids = entry['personalModelIds']
+    summaries.push({
+      provider: providerId,
+      name: typeof rule['providerName'] === 'string' ? rule['providerName'] : '',
+      // An absent flag is how the client's own written rules look; only an
+      // explicit false disables a provider.
+      enabled: rule['enabled'] !== false,
+      apiType: typeof api['type'] === 'string' ? api['type'] : '',
+      baseUrl: typeof api['baseUrl'] === 'string' ? api['baseUrl'] : '',
+      personalModels: Array.isArray(ids) ? ids.length : 0,
+      modelRules: models.filter(model => isRecord(model) && model['providerId'] === providerId).length,
+      retired: DEFAULT_REGIONS.some(region => legacyProviderIdsFor(region).includes(providerId)),
+    })
+  }
+  return summaries
 }
 
 /** Read-only summary of what this bridge currently has registered. */

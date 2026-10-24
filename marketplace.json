@@ -1,6 +1,6 @@
 {
   "name": "workbuddy-connect",
-  "description": "°Ñ±¾»ú WorkBuddy ÕËºÅ£¨¹úÄÚ°æ / ¹ú¼Ê°æ£©µÄÄ£ÐÍ½ÓÈë ZCode ¡ª¡ª º¬ WorkBuddy µÄÃâ·ÑÄ£ÐÍ¡£",
+  "description": "ï¿½Ñ±ï¿½ï¿½ï¿½ WorkBuddy ï¿½ËºÅ£ï¿½ï¿½ï¿½ï¿½Ú°ï¿½ / ï¿½ï¿½ï¿½Ê°æ£©ï¿½ï¿½Ä£ï¿½Í½ï¿½ï¿½ï¿½ ZCode ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ WorkBuddy ï¿½ï¿½ï¿½ï¿½ï¿½Ä£ï¿½Í¡ï¿½",
   "owner": {
     "name": "glunsan"
   },
@@ -8,14 +8,14 @@
     {
       "name": "workbuddy-connect",
       "source": "./plugins/workbuddy-connect",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "description": "Local WorkBuddy bridge: registers your own WorkBuddy account's models (free ones included) as a ZCode provider.",
       "displayName": "WorkBuddy Connect",
       "displayName_i18n": {
-        "zh-CN": "WorkBuddy ½ÓÈë"
+        "zh-CN": "WorkBuddy ï¿½ï¿½ï¿½ï¿½"
       },
       "description_i18n": {
-        "zh-CN": "°Ñ±¾»úÒÑµÇÂ¼µÄ WorkBuddy ÕËºÅÄ£ÐÍ£¨º¬Ãâ·ÑÄ£ÐÍ£©½ÓÈë ZCode£¬°²×°ºóÓÃ /workbuddy-connect Ò»¼üÍê³É¡£"
+        "zh-CN": "ï¿½Ñ±ï¿½ï¿½ï¿½ï¿½Ñµï¿½Â¼ï¿½ï¿½ WorkBuddy ï¿½Ëºï¿½Ä£ï¿½Í£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£ï¿½Í£ï¿½ï¿½ï¿½ï¿½ï¿½ ZCodeï¿½ï¿½ï¿½ï¿½×°ï¿½ï¿½ï¿½ï¿½ /workbuddy-connect Ò»ï¿½ï¿½ï¿½ï¿½É¡ï¿½"
       },
       "category": "utilities"
     }
