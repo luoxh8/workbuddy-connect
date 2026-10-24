@@ -11,7 +11,8 @@ const check = process.argv.includes('--check')
 const entries = [
   'src', 'package.json', 'README.md', 'LICENSE', 'NOTICE.md',
   'scripts/Start-Bridge.ps1', 'scripts/Install.ps1', 'scripts/Uninstall.ps1',
-  'scripts/Run-Bridge.ps1', 'scripts/Install-BridgeTask.ps1', 'scripts/Remove-BridgeTask.ps1',
+  'scripts/Run-Bridge.ps1', 'scripts/Launch-Bridge.vbs',
+  'scripts/Install-BridgeTask.ps1', 'scripts/Remove-BridgeTask.ps1',
   'scripts/Resolve-NodePath.ps1',
   'Install.cmd', 'Start-Bridge.cmd', 'Uninstall.cmd',
 ]

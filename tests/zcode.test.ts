@@ -71,29 +71,25 @@ test('bridge region base URL is derived and validated', () => {
   assert.throws(() => bridgeRegionBaseUrl('http://127.0.0.1:10108/nested', 'cn'), /must not include a path/)
 })
 
-test('provider ids are stable and namespaced', () => {
+test('provider ids are one per region, with no protocol suffix', () => {
   assert.equal(providerIdFor('cn'), 'workbuddy-cn')
   assert.equal(providerIdFor('global'), 'workbuddy-global')
-  assert.equal(providerIdFor('cn', 'anthropic'), 'workbuddy-cn-anthropic')
-  assert.equal(providerIdFor('cn', 'responses'), 'workbuddy-cn-responses')
 })
 
-test('installs a provider without disturbing the providers already configured', async t => {
+test('installs exactly one provider per region without disturbing existing providers', async t => {
   const f = await fixture()
   t.after(f.cleanup)
   const reports = await withFetch(() => catalog([freeRow, paidRow]), () => installZCode({
     bridgeUrl, token, regions: ['cn'], configPath: f.path,
   }))
   assert.deepEqual(reports, [
-    { provider: 'workbuddy-cn', region: 'cn', protocol: 'chat', action: 'installed', models: 2, freeModels: 1 },
-    { provider: 'workbuddy-cn-anthropic', region: 'cn', protocol: 'anthropic', action: 'installed', models: 2, freeModels: 1 },
-    { provider: 'workbuddy-cn-responses', region: 'cn', protocol: 'responses', action: 'installed', models: 2, freeModels: 1 },
+    { provider: 'workbuddy-cn', region: 'cn', action: 'installed', models: 2, freeModels: 1 },
   ])
 
   const written = JSON.parse(await readFile(f.path, 'utf8'))
   assert.deepEqual(written.config.providerOrder, ['deepseek'])
   const rules = written.config.providerConfigRules.providerRules
-  assert.deepEqual(rules.map((rule: any) => rule.providerId), ['deepseek', 'workbuddy-cn', 'workbuddy-cn-anthropic', 'workbuddy-cn-responses'])
+  assert.deepEqual(rules.map((rule: any) => rule.providerId), ['deepseek', 'workbuddy-cn'])
   assert.equal(rules[0].config.api.baseUrl, 'https://api.deepseek.com/anthropic')
   assert.equal(rules[0].config.access.apiKey, 'sk-user-key')
   const ours = rules[1]
@@ -109,13 +105,11 @@ test('installs a provider without disturbing the providers already configured', 
   assert.deepEqual(modelRules.map((rule: any) => `${rule.providerId}/${rule.modelId}`), [
     'deepseek/deepseek-flash',
     'workbuddy-cn/hy3', 'workbuddy-cn/glm-5.3',
-    'workbuddy-cn-anthropic/hy3', 'workbuddy-cn-anthropic/glm-5.3',
-    'workbuddy-cn-responses/hy3', 'workbuddy-cn-responses/glm-5.3',
   ])
   assert.equal(written.config.modelConfigRules.manualProviderModelRules.length, 1)
 })
 
-test('model metadata mirrors the bridge catalog', async t => {
+test('model metadata mirrors the bridge catalog in chat-completions field names', async t => {
   const f = await fixture()
   t.after(f.cleanup)
   await withFetch(() => catalog([freeRow, paidRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: f.path }))
@@ -132,18 +126,6 @@ test('model metadata mirrors the bridge catalog', async t => {
   const glm = rules.find((rule: any) => rule.modelId === 'glm-5.3')
   assert.deepEqual(glm.config.optionSpecs.reasoningLevel.values, ['low', 'high', 'max'])
   assert.equal(glm.config.optionSpecs.reasoningLevel.map, '{"reasoning_effort": reasoningLevel}')
-
-  // Each protocol's option map must write that protocol's own field names.
-  const rulesFor = (providerId: string) => written.config.modelConfigRules.providerModelRules
-    .filter((rule: any) => rule.providerId === providerId && rule.modelId === 'glm-5.3')[0]
-  const anthropic = rulesFor('workbuddy-cn-anthropic')
-  assert.equal(anthropic.config.optionSpecs.reasoningLevel.map, '{"output_config": {"effort": reasoningLevel}}')
-  assert.equal(anthropic.config.optionSpecs.maxOutputTokens.map, '{"max_tokens": maxOutputTokens}')
-  const responses = rulesFor('workbuddy-cn-responses')
-  assert.equal(responses.config.optionSpecs.reasoningLevel.map, '{"reasoning": {"effort": reasoningLevel}}')
-  assert.equal(responses.config.optionSpecs.maxOutputTokens.map, '{"max_output_tokens": maxOutputTokens}')
-  const chat = rulesFor('workbuddy-cn')
-  assert.equal(chat.config.optionSpecs.maxOutputTokens.map, '{"max_tokens": maxOutputTokens}')
 })
 
 test('free-only registration keeps just the zero-credit models', async t => {
@@ -153,9 +135,7 @@ test('free-only registration keeps just the zero-credit models', async t => {
     bridgeUrl, token, regions: ['cn'], freeOnly: true, configPath: f.path,
   }))
   assert.deepEqual(reports, [
-    { provider: 'workbuddy-cn', region: 'cn', protocol: 'chat', action: 'installed', models: 1, freeModels: 1 },
-    { provider: 'workbuddy-cn-anthropic', region: 'cn', protocol: 'anthropic', action: 'installed', models: 1, freeModels: 1 },
-    { provider: 'workbuddy-cn-responses', region: 'cn', protocol: 'responses', action: 'installed', models: 1, freeModels: 1 },
+    { provider: 'workbuddy-cn', region: 'cn', action: 'installed', models: 1, freeModels: 1 },
   ])
   const written = JSON.parse(await readFile(f.path, 'utf8'))
   assert.deepEqual(written.config.providerConfigRules.providerRules[1].config.personalModelIds, ['hy3'])
@@ -177,7 +157,7 @@ test('a rerun reports unchanged and leaves the file byte-identical', async t => 
   await withFetch(() => catalog([freeRow, paidRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: f.path }))
   const first = await readFile(f.path, 'utf8')
   const reports = await withFetch(() => catalog([freeRow, paidRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: f.path }))
-  assert.deepEqual(reports.map(report => report.action), ['unchanged', 'unchanged', 'unchanged'])
+  assert.deepEqual(reports.map(report => report.action), ['unchanged'])
   assert.equal(await readFile(f.path, 'utf8'), first)
 })
 
@@ -209,7 +189,7 @@ test('removal drops only this bridge and keeps the other provider intact', async
   t.after(f.cleanup)
   await withFetch(() => catalog([freeRow, paidRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: f.path }))
   const reports = await removeZCode({ bridgeUrl, regions: ['cn'], configPath: f.path })
-  assert.deepEqual(reports.map(report => report.provider), ['workbuddy-cn', 'workbuddy-cn-anthropic', 'workbuddy-cn-responses'])
+  assert.deepEqual(reports.filter(report => report.action !== 'skipped').map(report => report.provider), ['workbuddy-cn'])
   const written = JSON.parse(await readFile(f.path, 'utf8'))
   assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['deepseek'])
   assert.deepEqual(written.config.modelConfigRules.providerModelRules.map((rule: any) => rule.providerId), ['deepseek'])
@@ -225,7 +205,7 @@ test('removal refuses a provider the user re-pointed at another endpoint', async
   edited.config.providerConfigRules.providerRules[1].config.api.baseUrl = 'http://127.0.0.1:9099/cn/v1'
   await writeFile(f.path, JSON.stringify(edited, null, 2))
   const reports = await removeZCode({ bridgeUrl, regions: ['cn'], configPath: f.path })
-  assert.deepEqual(reports[0], { provider: 'workbuddy-cn', region: 'cn', protocol: 'chat', action: 'skipped', reason: 'not_owned' })
+  assert.deepEqual(reports[0], { provider: 'workbuddy-cn', region: 'cn', action: 'skipped', reason: 'not_owned' })
   const written = JSON.parse(await readFile(f.path, 'utf8'))
   assert.equal(written.config.providerConfigRules.providerRules.length, 2)
 })
@@ -234,7 +214,7 @@ test('removal without a bridge URL still claims a loopback region endpoint', asy
   const f = await fixture()
   t.after(f.cleanup)
   await withFetch(() => catalog([freeRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: f.path }))
-  assert.deepEqual((await removeZCode({ regions: ['cn'], configPath: f.path })).map(report => report.action), ['removed', 'removed', 'removed'])
+  assert.deepEqual((await removeZCode({ regions: ['cn'], configPath: f.path })).filter(report => report.action !== 'skipped').map(report => report.action), ['removed'])
 })
 
 test('an absent config is created instead of failing', async t => {
@@ -244,18 +224,14 @@ test('an absent config is created instead of failing', async t => {
   await withFetch(() => catalog([freeRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: path }))
   const written = JSON.parse(await readFile(path, 'utf8'))
   assert.equal(written.schemaVersion, 1)
-  assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['workbuddy-cn', 'workbuddy-cn-anthropic', 'workbuddy-cn-responses'])
+  assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['workbuddy-cn'])
 })
 
 test('registration summary reads back what install wrote', async t => {
   const f = await fixture()
   t.after(f.cleanup)
   await withFetch(() => catalog([freeRow, paidRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: f.path }))
-  assert.deepEqual((await readZCodeRegistration(f.path)).map(entry => [entry.provider, entry.protocol, entry.models]), [
-    ['workbuddy-cn', 'chat', 2],
-    ['workbuddy-cn-anthropic', 'anthropic', 2],
-    ['workbuddy-cn-responses', 'responses', 2],
-  ])
+  assert.deepEqual((await readZCodeRegistration(f.path)).map(entry => [entry.provider, entry.models]), [['workbuddy-cn', 2]])
   assert.deepEqual(await readZCodeRegistration(join(f.path, '..', 'absent.json')), [])
 })
 
@@ -267,14 +243,12 @@ test('both regions register side by side', async t => {
   }))
   const written = JSON.parse(await readFile(f.path, 'utf8'))
   assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), [
-    'deepseek',
-    'workbuddy-cn', 'workbuddy-cn-anthropic', 'workbuddy-cn-responses',
-    'workbuddy-global', 'workbuddy-global-anthropic', 'workbuddy-global-responses',
+    'deepseek', 'workbuddy-cn', 'workbuddy-global',
   ])
   await removeZCode({ regions: ['cn'], configPath: f.path })
   const after = JSON.parse(await readFile(f.path, 'utf8'))
   assert.deepEqual(after.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), [
-    'deepseek', 'workbuddy-global', 'workbuddy-global-anthropic', 'workbuddy-global-responses',
+    'deepseek', 'workbuddy-global',
   ])
 })
 
@@ -347,43 +321,104 @@ test('the default config path follows a custom ZCode data directory', async t =>
   }
 })
 
-test('installing one protocol leaves the others untouched', async t => {
-  const f = await fixture()
-  t.after(f.cleanup)
+/** A config left behind by bridge 1.4, which registered three providers per region. */
+function legacyConfig(): string {
+  const ours = (suffix: string, type: string, name: string) => ({
+    providerId: `workbuddy-cn${suffix}`,
+    providerName: name,
+    enabled: true,
+    config: {
+      group: 'standard-personal',
+      access: { type: 'api-key', apiKey: token },
+      api: { type, baseUrl: 'http://127.0.0.1:10108/cn/v1' },
+      personalModelIds: ['hy3'],
+      modelOrder: ['hy3'],
+      visibility: 'visible',
+    },
+  })
+  return JSON.stringify({
+    schemaVersion: 1,
+    config: {
+      providerOrder: ['deepseek', 'workbuddy-cn', 'workbuddy-cn-anthropic', 'workbuddy-cn-responses'],
+      providerConfigRules: {
+        providerRules: [
+          { providerId: 'deepseek', config: { access: { type: 'api-key', apiKey: 'sk-user-key' }, api: { type: 'anthropic-messages', baseUrl: 'https://api.deepseek.com/anthropic' } } },
+          ours('', 'openai-chat-completions', 'WorkBuddy CN'),
+          ours('-anthropic', 'anthropic-messages', 'WorkBuddy CN · Anthropic'),
+          ours('-responses', 'openai-responses', 'WorkBuddy CN · Responses'),
+        ],
+      },
+      modelConfigRules: {
+        providerModelRules: [
+          { providerId: 'deepseek', modelId: 'deepseek-flash', config: { enabled: true } },
+          { providerId: 'workbuddy-cn', modelId: 'hy3', config: { enabled: true } },
+          { providerId: 'workbuddy-cn-anthropic', modelId: 'hy3', config: { enabled: true } },
+          { providerId: 'workbuddy-cn-responses', modelId: 'hy3', config: { enabled: true } },
+        ],
+        manualProviderModelRules: [],
+      },
+    },
+  }, null, 2)
+}
+
+test('installing over the retired three-protocol layout cleans the extra providers', async t => {
+  const root = await mkdtemp(join(process.cwd(), '.test-zcode-legacy-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'provider_config.json')
+  await writeFile(path, legacyConfig())
+
   const reports = await withFetch(() => catalog([freeRow]), () => installZCode({
-    bridgeUrl, token, regions: ['cn'], protocols: ['anthropic'], configPath: f.path,
+    bridgeUrl, token, regions: ['cn'], configPath: path,
   }))
-  assert.deepEqual(reports, [
-    { provider: 'workbuddy-cn-anthropic', region: 'cn', protocol: 'anthropic', action: 'installed', models: 1, freeModels: 1 },
+  assert.deepEqual(reports, [{
+    provider: 'workbuddy-cn', region: 'cn', action: 'updated', models: 1, freeModels: 1,
+    cleaned: ['workbuddy-cn-anthropic', 'workbuddy-cn-responses'],
+  }])
+
+  const written = JSON.parse(await readFile(path, 'utf8'))
+  assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['deepseek', 'workbuddy-cn'])
+  assert.equal(written.config.providerConfigRules.providerRules[1].config.api.type, 'openai-chat-completions')
+  assert.deepEqual(written.config.modelConfigRules.providerModelRules.map((rule: any) => `${rule.providerId}/${rule.modelId}`), [
+    'deepseek/deepseek-flash', 'workbuddy-cn/hy3',
   ])
-  const written = JSON.parse(await readFile(f.path, 'utf8'))
-  assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['deepseek', 'workbuddy-cn-anthropic'])
-  const ours = written.config.providerConfigRules.providerRules[1]
-  assert.equal(ours.config.api.type, 'anthropic-messages')
-  assert.equal(ours.providerName, 'WorkBuddy CN · Anthropic')
-  assert.deepEqual(written.config.modelConfigRules.providerModelRules.map((rule: any) => rule.providerId), ['deepseek', 'workbuddy-cn-anthropic'])
+  // Ordering keeps the user's other entries but forgets the retired ids.
+  assert.deepEqual(written.config.providerOrder, ['deepseek', 'workbuddy-cn'])
 })
 
-test('a protocol-scoped removal keeps the other protocol providers', async t => {
-  const f = await fixture()
-  t.after(f.cleanup)
-  await withFetch(() => catalog([freeRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: f.path }))
-  const reports = await removeZCode({ bridgeUrl, regions: ['cn'], protocols: ['responses'], configPath: f.path })
-  assert.deepEqual(reports, [
-    { provider: 'workbuddy-cn-responses', region: 'cn', protocol: 'responses', action: 'removed' },
-  ])
-  const written = JSON.parse(await readFile(f.path, 'utf8'))
+test('a re-pointed legacy provider is left alone, not deleted', async t => {
+  const root = await mkdtemp(join(process.cwd(), '.test-zcode-legacy-owned-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'provider_config.json')
+  const config = JSON.parse(legacyConfig())
+  // The user turned the retired provider into their own endpoint.
+  config.config.providerConfigRules.providerRules[2].config.api.baseUrl = 'http://127.0.0.1:8080/cn/v1'
+  await writeFile(path, JSON.stringify(config, null, 2))
+
+  const reports = await withFetch(() => catalog([freeRow]), () => installZCode({
+    bridgeUrl, token, regions: ['cn'], configPath: path,
+  }))
+  // The re-pointed anthropic provider is the user's now; the untouched
+  // responses one still belongs to this bridge and is swept.
+  assert.deepEqual(reports[0].cleaned, ['workbuddy-cn-responses'])
+  const written = JSON.parse(await readFile(path, 'utf8'))
   assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), [
     'deepseek', 'workbuddy-cn', 'workbuddy-cn-anthropic',
   ])
+  assert.equal(written.config.providerConfigRules.providerRules[2].config.api.baseUrl, 'http://127.0.0.1:8080/cn/v1')
 })
 
-test('an unknown protocol is refused before any write', async t => {
-  const f = await fixture()
-  t.after(f.cleanup)
-  await assert.rejects(
-    () => withFetch(() => catalog([freeRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], protocols: ['gemini' as any], configPath: f.path })),
-    /protocols must contain/,
-  )
-  assert.equal(await readFile(f.path, 'utf8'), existingConfig())
+test('removal also sweeps the retired protocol providers', async t => {
+  const root = await mkdtemp(join(process.cwd(), '.test-zcode-legacy-remove-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'provider_config.json')
+  await writeFile(path, legacyConfig())
+
+  const reports = await removeZCode({ bridgeUrl, regions: ['cn'], configPath: path })
+  assert.deepEqual(reports.map(report => [report.provider, report.action]), [
+    ['workbuddy-cn', 'removed'],
+    ['workbuddy-cn-anthropic', 'removed'],
+    ['workbuddy-cn-responses', 'removed'],
+  ])
+  const written = JSON.parse(await readFile(path, 'utf8'))
+  assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['deepseek'])
 })

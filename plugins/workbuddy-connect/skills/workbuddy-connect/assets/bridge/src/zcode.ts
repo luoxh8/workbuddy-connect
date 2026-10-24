@@ -9,6 +9,10 @@
  * so every write is a full-document atomic replace that preserves unrelated
  * providers, rules and ordering.
  *
+ * One provider per region, speaking OpenAI Chat Completions: that is the wire
+ * format every client understands, and it is the shape WorkBuddy upstream
+ * answers in, so nothing is translated in between.
+ *
  * Only the bridge's own entries are ever touched: a provider is claimed by
  * `providerId`, and removal additionally re-checks the stored base URL and API
  * format, so a provider a user re-pointed elsewhere is left alone.
@@ -22,12 +26,6 @@ import { isDeepStrictEqual } from 'node:util'
 import { readJsonFile, writeJsonAtomic } from './storage.ts'
 
 export type ZCodeRegion = 'cn' | 'global'
-/**
- * Wire protocol one provider registration speaks. The bridge serves all three
- * from the same region base URL, so ZCode gets one provider per protocol and
- * the user picks whichever their workflow does best.
- */
-export type ZCodeProtocol = 'chat' | 'anthropic' | 'responses'
 
 export interface ZCodeInstallOptions {
   /** Loopback bridge origin, e.g. `http://127.0.0.1:10108`. */
@@ -35,8 +33,6 @@ export interface ZCodeInstallOptions {
   /** The bridge's own Bearer key; it becomes the provider's API key. */
   token: string
   regions?: readonly ZCodeRegion[]
-  /** Protocols to register; defaults to all three. */
-  protocols?: readonly ZCodeProtocol[]
   /** Register only models WorkBuddy currently bills at zero credits. */
   freeOnly?: boolean
   /** Test or portable override; production defaults to the ZCode personal config. */
@@ -45,7 +41,6 @@ export interface ZCodeInstallOptions {
 
 export interface ZCodeRemoveOptions {
   regions?: readonly ZCodeRegion[]
-  protocols?: readonly ZCodeProtocol[]
   bridgeUrl?: string
   configPath?: string
 }
@@ -53,16 +48,16 @@ export interface ZCodeRemoveOptions {
 export interface ZCodeInstallReport {
   provider: string
   region: ZCodeRegion
-  protocol: ZCodeProtocol
   action: 'installed' | 'updated' | 'unchanged'
   models: number
   freeModels: number
+  /** Providers from the retired multi-protocol layout that this run deleted. */
+  cleaned?: string[]
 }
 
 export interface ZCodeRemoveReport {
   provider: string
   region: ZCodeRegion
-  protocol: ZCodeProtocol
   action: 'removed' | 'skipped'
   reason?: 'not_found' | 'not_owned'
 }
@@ -82,16 +77,18 @@ interface BridgeModel {
 
 const GROUP = 'standard-personal'
 const DEFAULT_REGIONS: readonly ZCodeRegion[] = ['cn', 'global']
-const DEFAULT_PROTOCOLS: readonly ZCodeProtocol[] = ['chat', 'anthropic', 'responses']
 const REQUEST_TIMEOUT_MS = 30_000
 const SUPPORTED_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
-/** ZCode's spelling of each wire protocol in `config.api.type`. */
-const API_FORMAT: Readonly<Record<ZCodeProtocol, string>> = {
-  chat: 'openai-chat-completions',
-  anthropic: 'anthropic-messages',
-  responses: 'openai-responses',
-}
+/** The single wire format this bridge speaks, in ZCode's `config.api.type` spelling. */
+const API_TYPE = 'openai-chat-completions'
+
+/**
+ * Providers written by bridge versions ≤1.4, which registered one provider per
+ * protocol. They are still recognised so an upgrade (or `remove`) can clean up
+ * instead of leaving three dead entries per region behind.
+ */
+const LEGACY_SUFFIXES = ['-anthropic', '-responses'] as const
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -105,30 +102,18 @@ function regionsFor(value: readonly ZCodeRegion[] | undefined): ZCodeRegion[] {
   return regions
 }
 
-function protocolsFor(value: readonly ZCodeProtocol[] | undefined): ZCodeProtocol[] {
-  const protocols = value === undefined ? [...DEFAULT_PROTOCOLS] : [...new Set(value)]
-  if (protocols.length === 0 || protocols.some(protocol => !(protocol in API_FORMAT))) {
-    throw new Error('protocols must contain chat, anthropic and/or responses')
-  }
-  return protocols
+/** Provider identifier owned by this bridge for one region. */
+export function providerIdFor(region: ZCodeRegion): string {
+  return `workbuddy-${region}`
 }
 
-/**
- * Provider identifiers owned by this bridge.
- *
- * The chat-completions provider keeps its historical id so an existing
- * registration is updated in place rather than orphaned. The other protocols
- * need their own providers because ZCode stores exactly one `api.type` per
- * provider.
- */
-export function providerIdFor(region: ZCodeRegion, protocol: ZCodeProtocol = 'chat'): string {
-  return protocol === 'chat' ? `workbuddy-${region}` : `workbuddy-${region}-${protocol}`
+/** Identifiers the retired multi-protocol layout left behind for one region. */
+export function legacyProviderIdsFor(region: ZCodeRegion): string[] {
+  return LEGACY_SUFFIXES.map(suffix => `${providerIdFor(region)}${suffix}`)
 }
 
-export function providerDisplayName(region: ZCodeRegion, protocol: ZCodeProtocol = 'chat'): string {
-  const base = region === 'cn' ? 'WorkBuddy CN' : 'WorkBuddy Global'
-  if (protocol === 'chat') return base
-  return `${base} · ${protocol === 'anthropic' ? 'Anthropic' : 'Responses'}`
+export function providerDisplayName(region: ZCodeRegion): string {
+  return region === 'cn' ? 'WorkBuddy CN' : 'WorkBuddy Global'
 }
 
 /** The region's bridge base URL, as stored in the provider's `api.baseUrl`. */
@@ -261,36 +246,25 @@ function bridgeModels(body: unknown, freeOnly: boolean): { models: BridgeModel[]
 }
 
 /**
- * The optionSpecs map for one protocol.
+ * The optionSpecs map for a chat-completions provider.
  *
- * These strings are evaluated by ZCode inside the request body of that
- * protocol, so each has to use that protocol's own field names — the bridge
- * then reads the same names back. Getting this wrong is silent: the option
- * simply never reaches the request.
+ * These strings are evaluated by ZCode inside the request body, so they have to
+ * use this protocol's own field names — the bridge then reads the same names
+ * back. Getting this wrong is silent: the option simply never reaches the request.
  */
-function optionMaps(protocol: ZCodeProtocol, efforts: readonly string[], maxTokens: number | undefined): JsonRecord {
+function optionMaps(efforts: readonly string[], maxTokens: number | undefined): JsonRecord {
   const optionSpecs: JsonRecord = {}
   if (efforts.length > 0) {
-    const map = protocol === 'anthropic'
-      ? '{"output_config": {"effort": reasoningLevel}}'
-      : protocol === 'responses'
-        ? '{"reasoning": {"effort": reasoningLevel}}'
-        : '{"reasoning_effort": reasoningLevel}'
-    optionSpecs['reasoningLevel'] = { values: [...efforts], map }
+    optionSpecs['reasoningLevel'] = { values: [...efforts], map: '{"reasoning_effort": reasoningLevel}' }
   }
   if (maxTokens !== undefined) {
-    optionSpecs['maxOutputTokens'] = {
-      max: maxTokens,
-      map: protocol === 'responses'
-        ? '{"max_output_tokens": maxOutputTokens}'
-        : '{"max_tokens": maxOutputTokens}',
-    }
+    optionSpecs['maxOutputTokens'] = { max: maxTokens, map: '{"max_tokens": maxOutputTokens}' }
   }
   return optionSpecs
 }
 
-/** The ZCode model rule for one bridge model under one protocol. */
-function modelRule(providerId: string, protocol: ZCodeProtocol, model: BridgeModel): JsonRecord {
+/** The ZCode model rule for one bridge model. */
+function modelRule(providerId: string, model: BridgeModel): JsonRecord {
   const contextWindow = model.contextWindow ?? 200_000
   const properties: JsonRecord = {
     requiresMfjsToolSchema: false,
@@ -310,7 +284,7 @@ function modelRule(providerId: string, protocol: ZCodeProtocol, model: BridgeMod
     supportsNativeWebSearch: false,
     supportsMidConversationSystem: false,
   }
-  const optionSpecs = optionMaps(protocol, model.reasoningEfforts ?? [], model.maxTokens)
+  const optionSpecs = optionMaps(model.reasoningEfforts ?? [], model.maxTokens)
   return {
     providerId,
     modelId: model.id,
@@ -322,15 +296,15 @@ function modelRule(providerId: string, protocol: ZCodeProtocol, model: BridgeMod
   }
 }
 
-function providerRule(providerId: string, region: ZCodeRegion, protocol: ZCodeProtocol, baseUrl: string, token: string, modelIds: readonly string[]): JsonRecord {
+function providerRule(providerId: string, region: ZCodeRegion, baseUrl: string, token: string, modelIds: readonly string[]): JsonRecord {
   return {
     providerId,
-    providerName: providerDisplayName(region, protocol),
+    providerName: providerDisplayName(region),
     enabled: true,
     config: {
       group: GROUP,
       access: { type: 'api-key', apiKey: token },
-      api: { type: API_FORMAT[protocol], baseUrl },
+      api: { type: API_TYPE, baseUrl },
       personalModelIds: [...modelIds],
       modelOrder: [...modelIds],
       visibility: 'visible',
@@ -343,12 +317,17 @@ function isOwnProvider(rule: unknown, providerId: string): boolean {
   return isRecord(rule) && rule['providerId'] === providerId
 }
 
-/** True when a stored provider still points at this bridge's region endpoint. */
-function ownsBaseUrl(rule: JsonRecord, region: ZCodeRegion, protocol: ZCodeProtocol): boolean {
+/**
+ * True when a stored provider still points at a loopback region endpoint.
+ * `expectedType` is omitted for the retired multi-protocol entries, whose
+ * `api.type` depends on which protocol that old version registered.
+ */
+function ownsBaseUrl(rule: JsonRecord, region: ZCodeRegion, expectedType?: string): boolean {
   const config = rule['config']
   if (!isRecord(config)) return false
   const api = config['api']
-  if (!isRecord(api) || api['type'] !== API_FORMAT[protocol] || typeof api['baseUrl'] !== 'string') return false
+  if (!isRecord(api) || typeof api['baseUrl'] !== 'string') return false
+  if (expectedType !== undefined && api['type'] !== expectedType) return false
   try {
     const parsed = new URL(api['baseUrl'])
     const hostname = parsed.hostname.toLowerCase()
@@ -357,6 +336,18 @@ function ownsBaseUrl(rule: JsonRecord, region: ZCodeRegion, protocol: ZCodeProto
   } catch {
     return false
   }
+}
+
+/**
+ * True when a stored provider's base URL is exactly the endpoint this install
+ * writes. Used for the retired protocol providers: a leftover on a *different*
+ * port is a provider the user re-pointed, so it is theirs and stays.
+ */
+function pointsAt(rule: JsonRecord, baseUrl: string): boolean {
+  const config = rule['config']
+  if (!isRecord(config)) return false
+  const api = config['api']
+  return isRecord(api) && api['baseUrl'] === baseUrl
 }
 
 async function fetchBridgeModels(baseUrl: string, token: string, region: ZCodeRegion, freeOnly: boolean): Promise<{ models: BridgeModel[], free: number }> {
@@ -373,19 +364,35 @@ async function fetchBridgeModels(baseUrl: string, token: string, region: ZCodeRe
   return bridgeModels(await response.json().catch(() => undefined), freeOnly)
 }
 
+/** Drop a provider rule plus its model rules and ordering entry. */
+function dropProvider(rules: unknown[], modelRules: unknown[], body: JsonRecord, providerId: string): boolean {
+  const index = rules.findIndex(rule => isOwnProvider(rule, providerId))
+  if (index === -1) return false
+  rules.splice(index, 1)
+  for (let i = modelRules.length - 1; i >= 0; i -= 1) {
+    const entry = modelRules[i]
+    if (isRecord(entry) && entry['providerId'] === providerId) modelRules.splice(i, 1)
+  }
+  // The provider order list is a preference, not ownership: drop our id but
+  // leave every other entry exactly where the user put it.
+  const order = body['providerOrder']
+  if (Array.isArray(order)) {
+    const filtered = order.filter(entry => entry !== providerId)
+    order.length = 0
+    order.push(...filtered)
+  }
+  return true
+}
+
 /**
  * Register one provider per selected region. The bridge catalog is fetched
  * before any write, so an unreachable region cannot leave a half-written file.
- */
-/**
- * Register one provider per selected region × protocol. The bridge catalog is
- * fetched once per region before any write, so an unreachable region cannot
- * leave a half-written file.
+ * Providers left by the retired three-protocol layout are cleaned up here, so
+ * an upgrade converges on the single-provider shape without user action.
  */
 export async function installZCode(options: ZCodeInstallOptions): Promise<ZCodeInstallReport[]> {
   if (options.token.trim().length < 24) throw new Error('Bridge token must contain at least 24 characters')
   const regions = regionsFor(options.regions)
-  const protocols = protocolsFor(options.protocols)
   const configPath = options.configPath ?? defaultProviderConfigPath()
   const catalogs = new Map<ZCodeRegion, { models: BridgeModel[], free: number }>()
   for (const region of regions) {
@@ -407,50 +414,63 @@ export async function installZCode(options: ZCodeInstallOptions): Promise<ZCodeI
     const baseUrl = bridgeRegionBaseUrl(options.bridgeUrl, region)
     const catalog = catalogs.get(region)!
     const modelIds = catalog.models.map(model => model.id)
-    for (const protocol of protocols) {
-      const providerId = providerIdFor(region, protocol)
-      const nextProvider = providerRule(providerId, region, protocol, baseUrl, options.token, modelIds)
-      const ownedModelRules = catalog.models.map(model => modelRule(providerId, protocol, model))
+    const providerId = providerIdFor(region)
+    const nextProvider = providerRule(providerId, region, baseUrl, options.token, modelIds)
+    const ownedModelRules = catalog.models.map(model => modelRule(providerId, model))
 
-      const existingIndex = rules.findIndex(rule => isOwnProvider(rule, providerId))
-      const previousProvider = existingIndex === -1 ? undefined : rules[existingIndex]
-      const previousModelRules = modelRules.filter(rule => isRecord(rule) && rule['providerId'] === providerId)
+    const previousIndex = rules.findIndex(rule => isOwnProvider(rule, providerId))
+    const previousProvider = previousIndex === -1 ? undefined : rules[previousIndex]
+    const previousModelRules = modelRules.filter(rule => isRecord(rule) && rule['providerId'] === providerId)
 
-      if (existingIndex === -1) rules.push(nextProvider)
-      else rules[existingIndex] = { ...(isRecord(rules[existingIndex]) ? rules[existingIndex] as JsonRecord : {}), ...nextProvider }
-
-      // A model rule for another provider is never touched; ours are replaced
-      // wholesale so a model that left the WorkBuddy catalog also leaves ZCode.
-      const kept = modelRules.filter(rule => !(isRecord(rule) && rule['providerId'] === providerId))
-      kept.push(...ownedModelRules)
-
-      const unchanged = previousProvider !== undefined
-        && isDeepStrictEqual(previousProvider, nextProvider)
-        && isDeepStrictEqual(previousModelRules, ownedModelRules)
-      reports.push({
-        provider: providerId,
-        region,
-        protocol,
-        action: existingIndex === -1 ? 'installed' : unchanged ? 'unchanged' : 'updated',
-        models: modelIds.length,
-        freeModels: catalog.free,
-      })
-
-      const target = arraySection(modelConfigRules, 'providerModelRules')
-      target.length = 0
-      target.push(...kept)
-      providerRules['providerRules'] = rules
+    const cleaned: string[] = []
+    for (const legacyId of legacyProviderIdsFor(region)) {
+      const legacyRule = rules.find(rule => isOwnProvider(rule, legacyId))
+      // Only a leftover still pointing at this bridge's own region endpoint is
+      // ours to delete; a same-named provider the user re-pointed is kept.
+      if (isRecord(legacyRule) && pointsAt(legacyRule, baseUrl) && dropProvider(rules, modelRules, body, legacyId)) {
+        cleaned.push(legacyId)
+      }
     }
+
+    // Dropping legacy entries rewrites the array, so the index is resolved again.
+    const existingIndex = rules.findIndex(rule => isOwnProvider(rule, providerId))
+    if (existingIndex === -1) rules.push(nextProvider)
+    else rules[existingIndex] = { ...(isRecord(rules[existingIndex]) ? rules[existingIndex] as JsonRecord : {}), ...nextProvider }
+
+    // A model rule for another provider is never touched; ours are replaced
+    // wholesale so a model that left the WorkBuddy catalog also leaves ZCode.
+    const kept = modelRules.filter(rule => !(isRecord(rule) && rule['providerId'] === providerId))
+    kept.push(...ownedModelRules)
+
+    const unchanged = previousProvider !== undefined
+      && isDeepStrictEqual(previousProvider, nextProvider)
+      && isDeepStrictEqual(previousModelRules, ownedModelRules)
+      && cleaned.length === 0
+    reports.push({
+      provider: providerId,
+      region,
+      action: existingIndex === -1 ? 'installed' : unchanged ? 'unchanged' : 'updated',
+      models: modelIds.length,
+      freeModels: catalog.free,
+      ...cleaned.length === 0 ? {} : { cleaned },
+    })
+
+    const target = arraySection(modelConfigRules, 'providerModelRules')
+    target.length = 0
+    target.push(...kept)
+    providerRules['providerRules'] = rules
   }
 
   if (!isDeepStrictEqual(before, after)) await writeJsonAtomic(configPath, after)
   return reports
 }
 
-/** Remove only this bridge's providers and their model rules. */
+/**
+ * Remove this bridge's provider, its model rules and any provider left by the
+ * retired multi-protocol layout.
+ */
 export async function removeZCode(options: ZCodeRemoveOptions = {}): Promise<ZCodeRemoveReport[]> {
   const regions = regionsFor(options.regions)
-  const protocols = protocolsFor(options.protocols)
   const configPath = options.configPath ?? defaultProviderConfigPath()
   const before = await readConfig(configPath)
   const after = structuredClone(before)
@@ -464,11 +484,14 @@ export async function removeZCode(options: ZCodeRemoveOptions = {}): Promise<ZCo
 
   for (const region of regions) {
     const expectedBase = options.bridgeUrl === undefined ? undefined : bridgeRegionBaseUrl(options.bridgeUrl, region)
-    for (const protocol of protocols) {
-      const providerId = providerIdFor(region, protocol)
+    const targets: Array<{ providerId: string, expectedType?: string }> = [
+      { providerId: providerIdFor(region), expectedType: API_TYPE },
+      ...legacyProviderIdsFor(region).map(providerId => ({ providerId })),
+    ]
+    for (const { providerId, expectedType } of targets) {
       const index = rules.findIndex(rule => isOwnProvider(rule, providerId))
       if (index === -1) {
-        reports.push({ provider: providerId, region, protocol, action: 'skipped', reason: 'not_found' })
+        reports.push({ provider: providerId, region, action: 'skipped', reason: 'not_found' })
         continue
       }
       const rule = rules[index] as JsonRecord
@@ -476,28 +499,18 @@ export async function removeZCode(options: ZCodeRemoveOptions = {}): Promise<ZCo
         ? (rule['config'] as JsonRecord)['api'] as JsonRecord
         : undefined
       // Without an explicit bridge URL, ownership is structural: the stored base
-      // URL must be a loopback endpoint for this very region and protocol.
+      // URL must be a loopback endpoint for this very region.
       const owned = expectedBase === undefined
-        ? ownsBaseUrl(rule, region, protocol)
-        : storedApi !== undefined && storedApi['type'] === API_FORMAT[protocol] && storedApi['baseUrl'] === expectedBase
+        ? ownsBaseUrl(rule, region, expectedType)
+        : storedApi !== undefined
+          && (expectedType === undefined || storedApi['type'] === expectedType)
+          && storedApi['baseUrl'] === expectedBase
       if (!owned) {
-        reports.push({ provider: providerId, region, protocol, action: 'skipped', reason: 'not_owned' })
+        reports.push({ provider: providerId, region, action: 'skipped', reason: 'not_owned' })
         continue
       }
-      rules.splice(index, 1)
-      for (let i = modelRules.length - 1; i >= 0; i -= 1) {
-        const entry = modelRules[i]
-        if (isRecord(entry) && entry['providerId'] === providerId) modelRules.splice(i, 1)
-      }
-      // The provider order list is a preference, not ownership: drop our id but
-      // leave every other entry exactly where the user put it.
-      const order = body['providerOrder']
-      if (Array.isArray(order)) {
-        const filtered = order.filter(entry => entry !== providerId)
-        order.length = 0
-        order.push(...filtered)
-      }
-      reports.push({ provider: providerId, region, protocol, action: 'removed' })
+      dropProvider(rules, modelRules, body, providerId)
+      reports.push({ provider: providerId, region, action: 'removed' })
     }
   }
 
@@ -506,7 +519,7 @@ export async function removeZCode(options: ZCodeRemoveOptions = {}): Promise<ZCo
 }
 
 /** Read-only summary of what this bridge currently has registered. */
-export async function readZCodeRegistration(configPath = defaultProviderConfigPath()): Promise<Array<{ provider: string, region: ZCodeRegion, protocol: ZCodeProtocol, baseUrl: string, models: number }>> {
+export async function readZCodeRegistration(configPath = defaultProviderConfigPath()): Promise<Array<{ provider: string, region: ZCodeRegion, baseUrl: string, models: number }>> {
   let document: JsonRecord
   try {
     document = JSON.parse(await readFile(configPath, 'utf8')) as JsonRecord
@@ -516,10 +529,9 @@ export async function readZCodeRegistration(configPath = defaultProviderConfigPa
   const config = document['config']
   if (!isRecord(config) || !isRecord(config['providerConfigRules'])) return []
   const rules = arraySection(config['providerConfigRules'] as JsonRecord, 'providerRules')
-  const registered: Array<{ provider: string, region: ZCodeRegion, protocol: ZCodeProtocol, baseUrl: string, models: number }> = []
+  const registered: Array<{ provider: string, region: ZCodeRegion, baseUrl: string, models: number }> = []
   for (const region of DEFAULT_REGIONS) {
-    for (const protocol of DEFAULT_PROTOCOLS) {
-      const providerId = providerIdFor(region, protocol)
+    for (const providerId of [providerIdFor(region), ...legacyProviderIdsFor(region)]) {
       const rule = rules.find(entry => isOwnProvider(entry, providerId))
       if (!isRecord(rule)) continue
       const entry = rule['config']
@@ -529,7 +541,6 @@ export async function readZCodeRegistration(configPath = defaultProviderConfigPa
       registered.push({
         provider: providerId,
         region,
-        protocol,
         baseUrl: typeof api['baseUrl'] === 'string' ? api['baseUrl'] : '',
         models: Array.isArray(ids) ? ids.length : 0,
       })

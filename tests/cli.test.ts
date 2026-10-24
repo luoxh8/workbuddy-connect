@@ -54,6 +54,8 @@ test('usage names every command and the two universal flags', () => {
   }
   assert.match(text, /--help/)
   assert.match(text, /--version/)
+  // The retired multi-protocol surface must not come back through the help text.
+  assert.doesNotMatch(text, /install-codex|--protocol/)
   assert.ok(text.startsWith('Usage: workbuddy-connect'))
 })
 

@@ -8,13 +8,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $sourceRoot = Split-Path -Parent $PSScriptRoot
 $runScript = Join-Path $PSScriptRoot 'Run-Bridge.ps1'
+$launchScript = Join-Path $PSScriptRoot 'Launch-Bridge.vbs'
 $bridgeEntry = Join-Path $sourceRoot 'src\cli.ts'
 $resolvedState = [IO.Path]::GetFullPath($StateDir)
 $stateFile = Join-Path $resolvedState 'bridge.json'
 $runtimeFile = Join-Path $resolvedState 'runtime.json'
 $taskMetadata = Join-Path $resolvedState 'bridge-task.json'
 
-if (!(Test-Path -LiteralPath $runScript -PathType Leaf) -or !(Test-Path -LiteralPath $bridgeEntry -PathType Leaf)) {
+if (!(Test-Path -LiteralPath $runScript -PathType Leaf) -or !(Test-Path -LiteralPath $launchScript -PathType Leaf) -or !(Test-Path -LiteralPath $bridgeEntry -PathType Leaf)) {
     throw 'Bridge task scripts or entrypoint are missing.'
 }
 . (Join-Path $PSScriptRoot 'Resolve-NodePath.ps1')
@@ -61,18 +62,30 @@ function Test-TaskOwnedRuntime([int]$ProcessId) {
 
 $taskName = Get-TaskName $resolvedState
 $powerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ' + (Quote-TaskArgument $runScript) + ' -StateDir ' + (Quote-TaskArgument $resolvedState) + ' -Port ' + $Port + ' -NodePath ' + (Quote-TaskArgument $NodePath)
+$wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+# The action is wscript.exe running Launch-Bridge.vbs, not powershell.exe
+# directly: wscript has no console of its own, so no black window appears at
+# logon. The script starts the same PowerShell supervisor hidden.
+$arguments = '//B //Nologo ' + (Quote-TaskArgument $launchScript) + ' ' + (Quote-TaskArgument $resolvedState) + ' ' + $Port + ' ' + (Quote-TaskArgument $NodePath)
+$legacyArguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ' + (Quote-TaskArgument $runScript) + ' -StateDir ' + (Quote-TaskArgument $resolvedState) + ' -Port ' + $Port + ' -NodePath ' + (Quote-TaskArgument $NodePath)
 $identity = if ($env:USERDOMAIN) { "$env:USERDOMAIN\$env:USERNAME" } else { $env:USERNAME }
 
-$action = New-ScheduledTaskAction -Execute $powerShell -Argument $arguments -WorkingDirectory $sourceRoot
+$action = New-ScheduledTaskAction -Execute $wscript -Argument $arguments -WorkingDirectory $sourceRoot
 $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -RunOnlyIfIdle:$false -DontStopOnIdleEnd
 
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($null -ne $existing) {
     $existingAction = @($existing.Actions)[0]
-    $sameAction = $null -ne $existingAction -and $existingAction.Execute -eq $powerShell -and $existingAction.Arguments -eq $arguments
-    if (!$sameAction) {
+    # A task is ours when its action runs this installation's launcher (current
+    # layout) or used to run this installation's supervisor (the pre-vbs layout,
+    # migrated in place by this install). Anything else was not created here.
+    $isCurrentLayout = $null -ne $existingAction -and $existingAction.Execute -eq $wscript -and $existingAction.Arguments -eq $arguments
+    $isOurLegacyLayout = $null -ne $existingAction -and $existingAction.Execute -eq $powerShell `
+        -and $existingAction.Arguments -eq $legacyArguments
+    $isOurOldLauncher = $null -ne $existingAction -and $existingAction.Execute -eq $wscript `
+        -and $existingAction.Arguments.Contains($launchScript) -and $existingAction.Arguments.Contains((Quote-TaskArgument $resolvedState))
+    if (!$isCurrentLayout -and !$isOurLegacyLayout -and !$isOurOldLauncher) {
         throw "A Scheduled Task named '$taskName' already exists with a different action. It was not changed."
     }
 }
@@ -93,8 +106,12 @@ if (Test-Path -LiteralPath $runtimeFile) {
 }
 
 # `-NoAutoStart:$true` deliberately creates an on-demand task with no trigger.
-# Autostart tasks re-enter every minute: IgnoreNew leaves a healthy wrapper
-# alone and restarts one that was killed outside Task Scheduler.
+# Autostart tasks fire once at logon. Keep-alive is covered by two layers that
+# cost nothing while healthy: Run-Bridge.ps1 restarts the node child, and the
+# task's RestartOnFailure covers the wrapper.
+# 2026-10-24: the extra one-minute repetition trigger was removed. It re-woke
+# the task every 60s only to be rejected by IgnoreNew, which wrote a
+# 0x800710E0 event per minute and made the task look perpetually busy.
 $taskArguments = @{ Action = $action; Principal = $principal; Settings = $settings }
  $existingTriggers = if ($null -ne $existing) { @($existing.Triggers | Where-Object { $null -ne $_ }) } else { @() }
 $keepOnDemand = ($PSBoundParameters.ContainsKey('NoAutoStart') -and $NoAutoStart) -or (
@@ -102,10 +119,7 @@ $keepOnDemand = ($PSBoundParameters.ContainsKey('NoAutoStart') -and $NoAutoStart
 )
 if (!$keepOnDemand) {
     $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
-    # Omit duration so the schema serializes an indefinite PT1M repetition.
-    $periodicTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Now.AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 1)
-    $periodicTrigger.Repetition.StopAtDurationEnd = $false
-    $taskArguments['Trigger'] = @($logonTrigger, $periodicTrigger)
+    $taskArguments['Trigger'] = @($logonTrigger)
 }
 $definition = New-ScheduledTask @taskArguments
 

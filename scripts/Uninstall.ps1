@@ -1,6 +1,5 @@
 param(
     [ValidateSet('auto', 'cn', 'global', 'both')][string]$Region = 'both',
-    [ValidateSet('all', 'chat', 'anthropic', 'responses')][string]$Protocol = 'all',
     [string]$StateDir = (Join-Path $env:USERPROFILE '.workbuddy-connect')
 )
 $ErrorActionPreference = 'Stop'
@@ -8,7 +7,7 @@ $sourceRoot = Split-Path -Parent $PSScriptRoot
 $resolvedState = [IO.Path]::GetFullPath($StateDir)
 . (Join-Path $PSScriptRoot 'Resolve-NodePath.ps1')
 $nodePath = Resolve-BridgeNodePath
-& $nodePath (Join-Path $sourceRoot 'src\cli.ts') remove --state-dir $resolvedState --region $Region --protocol $Protocol
+& $nodePath (Join-Path $sourceRoot 'src\cli.ts') remove --state-dir $resolvedState --region $Region
 $removeExit = $LASTEXITCODE
 if ($removeExit -eq 2) { throw 'Provider removal was skipped because a provider is not owned by this bridge. The bridge and startup shortcut remain unchanged.' }
 if ($removeExit -ne 0) { throw 'Provider removal failed; bridge and startup shortcut remain unchanged.' }
@@ -30,4 +29,4 @@ if (Test-Path -LiteralPath $runtimePath) {
     $entry = Join-Path $sourceRoot 'src\cli.ts'
     if ($bridgeProcess -and $bridgeProcess.CommandLine -and $bridgeProcess.CommandLine.Contains($entry) -and $bridgeProcess.CommandLine.Contains($resolvedState)) { Stop-Process -Id $runtime.pid }
 }
-Write-Output 'WorkBuddy providers and this installation’s startup shortcut removed. Desktop login files are untouched.'
+Write-Output 'WorkBuddy providers and this installation鈥檚 startup shortcut removed. Desktop login files are untouched.'

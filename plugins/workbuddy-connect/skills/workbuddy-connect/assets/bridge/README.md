@@ -4,29 +4,35 @@
 [![license](https://img.shields.io/npm/l/workbuddy-connect.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/workbuddy-connect.svg)](package.json)
 
-把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型，变成一个本机多协议接口 —— 免费模型（`hy3`、`step-5-preview` 等）也在内。
-两个区域可以任选一个，也可以同时使用。
+把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型，变成一个本机 **OpenAI 兼容接口** ——
+免费模型（`hy3`、`step-5-preview` 等）也在内。两个区域可以任选一个，也可以同时使用。
 
-**不绑定 ZCode**：桥同时提供三种协议，同一份地址、三条路径，客户端用哪种都行：
+**只有一种协议：OpenAI Chat Completions。** 这是几乎所有客户端都认的通用格式，也是
+WorkBuddy 上游本身回答的格式，所以桥里面没有协议翻译层——请求进去什么样，转发出去就是什么样。
 
-| 协议 | 路径（以 `cn` 为例） | 认证头 |
+| 用途 | 路径（以 `cn` 为例） | 认证头 |
 |---|---|---|
-| OpenAI Chat Completions | `POST /cn/v1/chat/completions` | `Authorization: Bearer <key>` |
-| Anthropic Messages | `POST /cn/v1/messages` | `x-api-key: <key>` 或 `Authorization: Bearer <key>` |
-| OpenAI Responses | `POST /cn/v1/responses` | `Authorization: Bearer <key>` |
+| 对话 | `POST /cn/v1/chat/completions` | `Authorization: Bearer <key>` |
+| 模型目录 | `GET /cn/v1/models` | `Authorization: Bearer <key>` |
+| 剩余积分 | `GET /cn/v1/credits` | `Authorization: Bearer <key>` |
 
-三种协议共享同一个 `GET /cn/v1/models`、同一个端口、同一份区域凭据；向上游实际只发一种
-Chat Completions 请求，另两种协议在桥接内部双向翻译（请求改写 + 流式事件重编码）。
+`x-api-key: <key>` 也接受，方便只发这个头的客户端。Vercel AI SDK、LangChain、OpenWebUI、
+Chatbox、Cherry Studio、Dify、n8n……只要它能填一个 OpenAI 兼容的 base URL 就能接。
+
+> **为什么 2.0 去掉了 Anthropic Messages 和 OpenAI Responses？** 这两种协议各自要维护一整套请求
+> 改写、流式事件重编码和错误信封映射，而它们能连上的客户端**同时都能连 Chat Completions**——
+> 三份代码换不来多一个可用客户端。真遇到**只**说 Anthropic / Responses 的客户端
+> （例如新版 Codex CLI 强制 `wire_api = "responses"`），用 1.4.x 的 tag，或在客户端前面挂一个只说
+> 那一种协议的转发器。
 
 支持**直接接入**的客户端（不用手写配置）：
 
 - **ZCode** —— 见「方法一 / 方法二」
-- **ChatGPT 桌面版 / Codex CLI** —— `install-codex`，见「接入 ChatGPT 桌面版 / Codex」
 
 ```text
-任意客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
-              ├─ WorkBuddy CN/模型名称
-              └─ WorkBuddy Global/模型名称
+任意 OpenAI 兼容客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
+                          ├─ WorkBuddy CN/模型名称
+                          └─ WorkBuddy Global/模型名称
 ```
 
 **消耗的是你自己 WorkBuddy 账号的积分。** 免费模型（倍率 `x0.00`，例如 `hy3`、`step-5-preview`）
@@ -39,10 +45,9 @@ WorkBuddy 桌面端把模型藏在它自己的登录态后面，客户端拿不�
 所以本项目的做法是：
 
 1. 一个只跑在 `127.0.0.1` 的本地桥接进程，用你自己 WorkBuddy 桌面端的登录态去访问
-   WorkBuddy 的模型接口，对外提供 **OpenAI Chat Completions**、**Anthropic Messages** 与
-   **OpenAI Responses**（`/v1/models` 之外的三条路径）；
-2. 一个可选的安装命令，把桥接注册成 **ZCode 的自定义 provider**（每个区域 × 每种协议各一条，
-   ZCode 一个 provider 只能有一种 `api.type`）：默认写 `%USERPROFILE%\.zcode\v2\provider_config.json`；
+   WorkBuddy 的模型接口，对外提供 **OpenAI Chat Completions**（外加 `/v1/models` 与 `/v1/credits`）；
+2. 一个可选的安装命令，把桥接注册成 **ZCode 的自定义 provider**（每个区域一条）：
+   默认写 `%USERPROFILE%\.zcode\v2\provider_config.json`；
    改过数据目录则写 `<数据目录>\.zcode\v2\provider_config.json`）。其它客户端不需要这一步，
    直接填地址和 key。
 
@@ -81,8 +86,7 @@ WorkBuddy 桌面端把模型藏在它自己的登录态后面，客户端拿不�
 1. 把仓库克隆或下载到一个准备长期保留的目录。
 2. 双击 `Install.cmd`。它会注册 Windows 计划任务（登录后隐藏启动、意外退出自动恢复），
    然后自动识别当前已登录的区域并注册模型。
-3. 重启 ZCode，在模型选择器里找 `WorkBuddy CN` / `WorkBuddy Global`（Chat Completions）、
-   `WorkBuddy CN · Anthropic`、`WorkBuddy CN · Responses` 等六条（两个区域全装时）。
+3. 重启 ZCode，在模型选择器里找 `WorkBuddy CN` / `WorkBuddy Global`（两个区域全装时各一条）。
 
 ```powershell
 # 只接国内 / 只接国际 / 同时接两边
@@ -92,9 +96,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Regio
 
 # 只注册免费模型（倍率 x0.00）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Region cn -FreeOnly
-
-# 只注册某一种协议（默认三种都注册）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Region cn -Protocol anthropic
 
 # 换端口 / 不设置登录后自启
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -Port 10109 -NoAutoStart
@@ -114,54 +115,18 @@ workbuddy-connect serve                 # 前台跑桥接（默认 127.0.0.1:101
 包内自带 .ts 类型擦除的 loader，装进 `node_modules` 也能跑（Node ≥ 22.18）；
 `npm i` 不触发任何生命周期脚本，注册 provider 必须显式跑 `workbuddy-connect install`。
 
-## 接入 ChatGPT 桌面版 / Codex CLI
+## 接入 ChatGPT 桌面版 / Codex CLI（2.0 起不再支持）
 
-Windows 上的 **ChatGPT 桌面版就是 Codex**（MSIX 包名 `OpenAI.Codex`，显示名 `ChatGPT`）：
-它和 `codex` 命令行读**同一份** `~/.codex/config.toml`、同一个模型目录。所以一条命令同时接两边：
+新版 Codex CLI / ChatGPT 桌面版**强制 `wire_api = "responses"`**，二进制里直接写着
+`wire_api = "chat"` is no longer supported，而本桥只提供 Chat Completions，所以 2.0 起
+`install-codex` / `remove-codex` 两个命令已移除。
 
-```powershell
-node src/cli.ts install-codex --region cn
-# 装成 npm 包后：workbuddy-connect install-codex --region cn
-```
+需要把 WorkBuddy 接进 Codex 时有两个选择：
 
-它做三件事，全部写在 `# >>> workbuddy-connect >>>` 标记块里，可逆：
+1. 用 **1.4.x** 的 tag（那版带 Responses 路由和 Codex 目录生成）；
+2. 让 Codex 直连官方端点——DeepSeek 官方 `POST https://api.deepseek.com/responses` 已可用，
+   本机就是这么配的，中间不需要任何代理。
 
-1. 在 `config.toml` 追加 `[model_providers.workbuddy]`，
-   `wire_api = "responses"`，`base_url = http://127.0.0.1:10108/<region>/v1`；
-2. 把 `model_provider` / `model_catalog_json` 指向本桥，`model` 默认落到**免费模型**；
-3. 生成 `<config 同目录>/workbuddy-models.json`——把 `/v1/models` 的每个模型写成 Codex 能读的
-   目录条目（上下文窗口、视觉输入、推理档位、优先级）。
-
-然后**重启 ChatGPT 桌面版**（或开新的 `codex` 会话），模型选择器里就有这些模型了。
-
-```powershell
-node src/cli.ts install-codex --region cn --free-only   # 只放免费模型
-node src/cli.ts install-codex --region both             # 国内 + 国际
-node src/cli.ts remove-codex                            # 撤回，逐字节还原 config.toml
-```
-
-自定义位置：`--codex-config <path>`、`--codex-catalog <path>`；默认跟随 `$CODEX_HOME`。
-
-**不覆盖你已有的模型目录**：Codex 只能读一个目录文件。如果 `config.toml` 里的
-`model_catalog_json` 已指向别处（例如你另外配的 DeepSeek 代理），install 会把那个目录里的模型
-**合并**进新目录，安装报告里会写明转移了几个。重装不会丢掉它们，也不会把你手选过的 `model`
-改回默认。
-
-### 为什么需要替换系统提示词
-
-Codex 每轮都会把它自带的约 17 KB 系统提示词作为 `developer` 消息发出来，而 **WorkBuddy 上游会
-直接 HTTP 400 拒掉这份原文**。实测触发点在这句：
-
-```text
-Codex CLI is an open source project led by OpenAI.
-```
-
-这与长度、换行、`tools` 字段都无关（同样的长度、同样的结构，把这句话换掉就通过），所以不能靠
-裁剪或重试绕开。桥接的做法是用 Codex 自己的扩展点 `model_catalog_json` → `base_instructions`
-下发一份**等效但措辞中性**的系统提示词，客户端从一开始就不发被拒的原文，桥接仍然只做协议翻译、
-不改写用户内容。这也是为什么这个接入必须生成目录文件，不能只填一个 `base_url`。
-
-> 该限制属于 WorkBuddy 上游，可能随它更新而改变；改了之后这条替换自然不再必要，但留着也无害。
 
 ## 日常使用
 
@@ -171,39 +136,33 @@ node src/cli.ts --version                        # 版本（取自 package.json�
 node src/cli.ts accounts                          # 只读检查桌面登录状态
 node src/cli.ts status                            # 桥接与各区域状态
 node src/cli.ts models --region cn                # 模型目录（含免费标记，不消耗积分）
-node src/cli.ts install --region cn               # 注册/刷新三种协议（可重复运行）
+node src/cli.ts install --region cn               # 注册/刷新 provider（可重复运行）
 node src/cli.ts install --region cn --free-only   # 只注册免费模型
-node src/cli.ts install --region cn --protocol anthropic   # 只注册 Anthropic Messages
 node src/cli.ts remove --region cn                # 只移除本桥接注册的 provider
-node src/cli.ts remove --region cn --protocol responses    # 只移除 Responses 那条
 ```
 
 装成 npm 包之后换成 `workbuddy-connect <command>` 即可，参数完全一致。
 `serve` 是前台运行；`status` 是默认命令，不给命令直接跑就是它。
 
-`install` 默认给**每个区域 × 每种协议**各注册一条 provider（全装时国内 / 国际各三条）：
-Chat Completions 那条沿用历史 id `workbuddy-cn`，另两条是 `workbuddy-cn-anthropic`
-与 `workbuddy-cn-responses`。可以重复运行以同步可用模型、上下文窗口、图像输入和上游声明的推理档位；
-模型目录缓存最长 5 分钟。它只增删自己那几条 provider 和它们名下的 model 规则，
-其他 provider、`providerOrder` 和你手写的规则都保持原样。
+`install` 给**每个区域各注册一条 provider**（`workbuddy-cn` / `workbuddy-global`）。
+可以重复运行以同步可用模型、上下文窗口、图像输入和上游声明的推理档位；模型目录缓存最长 5 分钟。
+它只增删自己那条 provider 和它名下的 model 规则，其他 provider、`providerOrder` 和你手写的规则都保持原样。
+从 1.4.x 升级时，旧的 `workbuddy-<region>-anthropic` / `-responses` 两条会**自动清掉**（只在它们仍指向本桥时才删）。
 
 真实调用（会消耗积分，建议先用免费模型）：
 
 ```powershell
-node src/cli.ts smoke --region cn --model hy3 --protocol chat
-node src/cli.ts smoke --region cn --model hy3 --protocol anthropic
-node src/cli.ts smoke --region cn --model hy3 --protocol responses
+node src/cli.ts smoke --region cn --model hy3
 ```
 
 本地 API：
 
-- `GET /healthz`、`GET /status`（`/status` 的 `protocols` 字段列出三条协议）
-- `GET|POST /cn/v1/{models,chat/completions,messages,responses}`
-- `GET|POST /global/v1/{models,chat/completions,messages,responses}`
+- `GET /healthz`、`GET /status`（`/status` 的 `protocol` 字段是 `openai-chat-completions`）
+- `GET /cn/v1/{models,credits}`、`POST /cn/v1/chat/completions`
+- `GET /global/v1/{models,credits}`、`POST /global/v1/chat/completions`
 
-所有接口都需要桥接自己的本地密钥（安装时自动生成）：Chat Completions / Responses 用
-`Authorization: Bearer`，Anthropic Messages 用 `x-api-key`（两种头桥接都接受）。
-不需要手工粘贴 WorkBuddy token。
+所有接口都需要桥接自己的本地密钥（安装时自动生成）：主用 `Authorization: Bearer`，
+也接受 `x-api-key`。不需要手工粘贴 WorkBuddy token。
 
 ## 登录、数据与权限
 
@@ -292,6 +251,13 @@ node src/cli.ts status
 
 **能接别人的账号吗？** 不能也不应该。桥接只用本机已登录的账号。
 
+**开机时冒出黑色控制台窗口？** 2.0 起不会了。之前计划任务的动作直接是 `powershell.exe`（它再拉起
+`node.exe`），而任务计划器在交互式会话里启动控制台程序时，Windows 会先给它的控制台分配窗口，
+程序自己再怎么 `-WindowStyle Hidden` 也来不及——那一下闪窗就是这么来的。现在动作改成
+`wscript.exe` 跑 `scripts/Launch-Bridge.vbs`：wscript 是 GUI 子系统宿主，**根本不分配控制台**，
+再由它以隐藏方式启动 PowerShell 监督进程和 node 子进程。升级后再跑一次安装（或
+`Remove-BridgeTask.ps1` + `Install-BridgeTask.ps1`）即可切到新布局，旧布局的任务会被原地迁移。
+
 **macOS / Linux 能用吗？** Node 核心保留了相应的登录文件探测，但本发布只完成 Windows 验证。
 其他平台可手动跑 `node src/cli.ts serve` 与 `install`，后台服务需自行配置。
 
@@ -309,7 +275,7 @@ provider 和 WorkBuddy 桌面登录。删插件只需在 ZCode 的插件管理�
 变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ```powershell
-npm test                # 单元测试（44 个，不访问真实 WorkBuddy 账号）
+npm test                # 单元测试（62 个，不访问真实 WorkBuddy 账号）
 npm run build:plugin    # 把运行时代码同步进插件自包含目录（改版本号后必须跑）
 npm run check:plugin    # 校验插件内副本与源码一致
 ```

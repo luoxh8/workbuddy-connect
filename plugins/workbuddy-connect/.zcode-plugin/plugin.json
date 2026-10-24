@@ -1,8 +1,10 @@
 {
   "name": "workbuddy-connect",
-  "version": "1.3.0",
-  "description": "鎶婃湰鏈哄凡鐧诲綍鐨?WorkBuddy 璐﹀彿妯″瀷锛堝惈鍏嶈垂妯″瀷锛夋帴鍏?ZCode锛氭湰鍦版ˉ鎺?+ 涓�閿敞鍐?provider銆?,
-  "author": { "name": "glunsan" },
+  "version": "2.0.0",
+  "description": "把本机已登录的 WorkBuddy 账号模型（含免费模型）接入 ZCode：本地桥接 + 一键注册 provider。",
+  "author": {
+    "name": "glunsan"
+  },
   "homepage": "https://github.com/luoxh8/workbuddy-connect",
   "license": "MIT",
   "skills": "./skills",

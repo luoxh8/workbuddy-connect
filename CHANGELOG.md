@@ -2,6 +2,43 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.0] - 2026-10-24
+
+**破坏性变更：只剩一种协议。** 三协议是 1.3.0 加进来的，但 Anthropic Messages 与 OpenAI Responses
+能连上的客户端**同时都能连 Chat Completions**，而每种协议都要各自维护一套请求改写、流式事件重编码
+和错误信封映射。三份代码换不来多一个可用客户端，所以 2.0 只保留 ChatGPT 全生态通用的那一种。
+
+### Removed
+
+- **Anthropic Messages 与 OpenAI Responses 路由**（`src/protocols.ts` 整个删除，约 1000 行）。
+  `/v1/messages` 与 `/v1/responses` 现在返回 404；`/status` 的 `protocols` 数组换成单个 `protocol` 字段。
+- **`--protocol` 参数**（`install` / `remove` / `smoke` 以及 `Install.ps1` / `Uninstall.ps1` 的
+  `-Protocol`）。`smoke` 现在固定发 Chat Completions 请求。
+- **Codex 接入**（`src/codex.ts` 整个删除，命令 `install-codex` / `remove-codex`）。新版 Codex CLI
+  与 ChatGPT 桌面版强制 `wire_api = "responses"`（二进制里写着
+  `` `wire_api = "chat"` is no longer supported ``），与单协议桥接不兼容。
+  需要这条链路时用 **1.4.x** 的 tag，或让 Codex 直连官方 Responses 端点。
+- `src/` 少了一个模块间的耦合点：`server.ts` 不再引入任何协议翻译层。
+
+### Added
+
+- **升级时自动清理**：`install` 会删掉 1.4.x 留下的 `workbuddy-<region>-anthropic` /
+  `-responses` 两条 provider 及其 model 规则，并在报告的 `cleaned` 字段里列出。
+  只有当那条 provider 的 `baseUrl` **精确等于**本桥这次写入的地址时才删——用户改到别的端口
+  或自建端点的同名 provider 一律保留。`remove` 同样会扫掉这两种遗留条目。
+- 测试 62 个（删掉协议翻译与 Codex 的用例，新增遗留清理与"用户改过就不动"的用例）。
+
+### Fixed
+
+- **开机时闪出的黑色控制台窗口。** 计划任务的动作原本直接是 `powershell.exe`（再由它拉起
+  `node.exe`）。任务计划器在交互式会话里启动控制台程序时会先分配控制台窗口，程序自己再怎么
+  `-WindowStyle Hidden` 也来不及。现在动作改为 `wscript.exe` 跑新增的
+  `scripts/Launch-Bridge.vbs`：wscript 是 GUI 子系统宿主，**不分配控制台**，再由它以隐藏方式
+  启动 PowerShell 监督进程与 node 子进程。旧布局的任务在下次安装时原地迁移（
+  `Install-BridgeTask.ps1` / `Remove-BridgeTask.ps1` 都认两种布局）。
+- `marketplace.json` 与 `plugins/.../plugin.json` 里的中文之前被写成了非法 UTF-8（JSON 解析失败），
+  一并修正。
+
 ## [1.4.0] - 2026-10-20
 
 ### Added

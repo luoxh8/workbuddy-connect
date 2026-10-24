@@ -1,24 +1,27 @@
 ---
 name: workbuddy-connect
-description: 把本机已登录的 WorkBuddy（国内版 / 国际版）账号模型接入 ZCode、ChatGPT 桌面版或 Codex CLI，包括 WorkBuddy 的免费模型；三种协议（OpenAI Chat Completions / Anthropic Messages / OpenAI Responses）全部注册。当用户说「接入 WorkBuddy」「把 workbuddy 模型接到 zcode」「接进 ChatGPT」「接到 ChatGPT 桌面版」「Codex 用 WorkBuddy」「WorkBuddy 免费模型」「workbuddy-connect 装一下」「刷新 WorkBuddy 模型」「检查 WorkBuddy 连接」「卸载 WorkBuddy 接入」时使用。
+description: 把本机已登录的 WorkBuddy（国内版 / 国际版）账号模型接入 ZCode 或任何 OpenAI 兼容客户端，包括 WorkBuddy 的免费模型。桥只提供一种协议（OpenAI Chat Completions）。当用户说「接入 WorkBuddy」「把 workbuddy 模型接到 zcode」「WorkBuddy 免费模型」「workbuddy-connect 装一下」「刷新 WorkBuddy 模型」「检查 WorkBuddy 连接」「卸载 WorkBuddy 接入」时使用。
 ---
 
 # WorkBuddy Connect
 
-把用户**自己账号**的 WorkBuddy 模型接进 ZCode。桥接进程在本机回环地址上同时提供
-**OpenAI Chat Completions**、**Anthropic Messages**、**OpenAI Responses** 三种协议，
-再作为 ZCode 的自定义 provider 注册（每个区域 × 每种协议各一条）。
+把用户**自己账号**的 WorkBuddy 模型接进 ZCode（或任何 OpenAI 兼容客户端）。桥接进程在本机回环地址上
+提供**一种**协议——**OpenAI Chat Completions**——再作为 ZCode 的自定义 provider 注册（每个区域一条）。
 
 ```text
-ZCode / 任意客户端 → 本机桥接 (127.0.0.1:10108) → 用户自己的 WorkBuddy 账号
+ZCode / 任意 OpenAI 兼容客户端 → 本机桥接 (127.0.0.1:10108) → 用户自己的 WorkBuddy 账号
                       ├─ POST /<region>/v1/chat/completions   (openai-chat-completions)
-                      ├─ POST /<region>/v1/messages           (anthropic-messages)
-                      └─ POST /<region>/v1/responses          (openai-responses)
+                      ├─ GET  /<region>/v1/models
+                      └─ GET  /<region>/v1/credits
 ```
 
-**三种协议共享同一端口、同一区域凭据、同一个 `GET /<region>/v1/models`。**
-向上游只发一种 Chat Completions 请求，另两种在桥接内部双向翻译；图片去重 / 缩图 / 超预算丢弃
-对三条路径都生效。
+上游本身就是 Chat Completions 格式，所以桥里没有协议翻译层：图片去重 / 缩图 / 超预算丢弃
+直接在转发前做一次。
+
+**不要再给用户推荐 Anthropic Messages 或 OpenAI Responses 路径**：2.0 起已移除，`/v1/messages` 与
+`/v1/responses` 会返回 404，`--protocol` 参数也不存在了。遇到**只**说这两种协议的客户端
+（例如新版 Codex CLI 强制 `wire_api = "responses"`），说明 1.4.x 的 tag 还能用，或者让客户端在
+前面挂一个只说那一种协议的转发器。
 
 **消耗的是用户自己 WorkBuddy 账号的积分。** 本项目不提供账号、不附带积分。
 调用量以 WorkBuddy 当时的数据为准；免费模型（倍率 `x0.00`）按 WorkBuddy 当期政策执行。
@@ -61,77 +64,45 @@ Node（PATH → WorkBuddy 自带运行时 `%USERPROFILE%\.workbuddy\binaries\nod
    node "$BRIDGE/src/cli.ts" models --region cn
    ```
 
-4. 注册进 ZCode。**默认三种协议全注册**（每个区域三条 provider）：
+4. 注册进 ZCode（每个区域一条 provider，没有协议可选）：
 
    ```powershell
-   # 全部可用模型 × 三种协议（免费模型也在其中）
    node "$BRIDGE/src/cli.ts" install --region cn
    node "$BRIDGE/src/cli.ts" install --region cn --free-only
-
-   # 只要某一种协议（chat / anthropic / responses）
-   node "$BRIDGE/src/cli.ts" install --region cn --protocol anthropic
    ```
 
-   | `--protocol` | ZCode `api.type` | 请求路径 | provider id |
-   |---|---|---|---|
-   | `chat`（默认含） | `openai-chat-completions` | `/v1/chat/completions` | `workbuddy-<region>` |
-   | `anthropic` | `anthropic-messages` | `/v1/messages` | `workbuddy-<region>-anthropic` |
-   | `responses` | `openai-responses` | `/v1/responses` | `workbuddy-<region>-responses` |
+   provider id 是 `workbuddy-<region>`，`api.type` 固定为 `openai-chat-completions`。
+   `optionSpecs` 用 Chat Completions 的字段名（`reasoning_effort`、`max_tokens`），
+   所以推理档位与输出上限都可用。
 
-   每条的 `optionSpecs` 用该协议自己的字段名（`reasoning_effort` /
-   `output_config.effort` / `reasoning.effort`，以及 `max_tokens` / `max_output_tokens`），
-   所以推理档位与输出上限在三条 provider 上都可用。
+   从 1.4.x 升级时，旧的 `workbuddy-<region>-anthropic` / `-responses` 会在 install 时自动清掉，
+   报告里会以 `cleaned` 字段列出删了哪几条。
 
-5. 让用户**重启 ZCode**，然后在模型选择器里找 `WorkBuddy CN`、`WorkBuddy CN · Anthropic`、
-   `WorkBuddy CN · Responses`（国际版同理）。
-
-## 接入 ChatGPT 桌面版 / Codex CLI
-
-Windows 上 ChatGPT 桌面版就是 Codex（MSIX 包名 `OpenAI.Codex`）；它和 `codex` 命令行读同一份
-`%USERPROFILE%\.codex\config.toml`、同一个模型目录，所以一条命令同时接两边：
-
-```powershell
-node "$BRIDGE/src/cli.ts" install-codex --region cn
-node "$BRIDGE/src/cli.ts" remove-codex        # 撤回，逐字节还原 config.toml
-```
-
-它会在 `config.toml` 里写一个 `# >>> workbuddy-connect >>>` 标记块
-（`[model_providers.workbuddy]`、`model_provider`、`model_catalog_json`、默认免费 `model`），
-并在同目录生成 `workbuddy-models.json`。写完要**重启 ChatGPT 桌面版**（或开新的 codex 会话）。
-
-**不要跳过目录文件**：Codex 每轮会把它自带的约 17 KB 系统提示词作为 `developer` 消息发出，
-WorkBuddy 上游会以 HTTP 400 拒掉该原文（触发点含 `Codex CLI is an open source project led by OpenAI`）。
-目录里的 `base_instructions` 是 Codex 官方的覆盖入口，用来下发一份等效但措辞中性的提示词——
-没有它，连接本身会通，但每次对话都 400。
-
-若用户原来的 `model_catalog_json` 指向别处，install 会**合并**那个目录的模型，不会让它们消失；
-安装报告的 `note` 会写明保留了几个。
+5. 让用户**重启 ZCode**，然后在模型选择器里找 `WorkBuddy CN` / `WorkBuddy Global`。
 
 ## 其他命令
 
 ```powershell
-node "$BRIDGE/src/cli.ts" status                     # 桥接、各区域登录状态、可用协议
-node "$BRIDGE/src/cli.ts" remove --region cn         # 移除本桥接注册的 provider（默认三种全删）
-node "$BRIDGE/src/cli.ts" remove --region cn --protocol responses   # 只删一条
-node "$BRIDGE/src/cli.ts" smoke --region cn --model hy3 --protocol anthropic   # 真实调用（可能消耗积分）
+node "$BRIDGE/src/cli.ts" status                     # 桥接、各区域登录状态、协议
+node "$BRIDGE/src/cli.ts" remove --region cn         # 移除本桥接注册的 provider
+node "$BRIDGE/src/cli.ts" smoke --region cn --model hy3   # 真实调用（可能消耗积分）
 ```
 
-`smoke` 必须显式给 `--protocol chat|anthropic|responses`：它按该协议构造请求并解析响应，
-这样才能真的验证那条路径，而不是拿 chat 的结论冒充。
+`smoke` 直接发一条 Chat Completions 请求并解析回包，用来验证整条链路真的通。
 
 `install` 会写 ZCode 那份个人 provider 配置：默认 `%USERPROFILE%\.zcode\v2\provider_config.json`；
 若在「设置 → 数据目录」里改过数据目录（`dataBaseDir`），则写
 `<数据目录>\.zcode\v2\provider_config.json`——**那份才是 ZCode 实际读的**，写错地方模型不会出现
-（脚本会读 `%USERPROFILE%\.zcode\v2\setting.json` 自行判断）。它只增删自己那几条 provider
-和它们名下的 model 规则，其他 provider、`providerOrder` 与手写规则都保持原样；
+（脚本会读 `%USERPROFILE%\.zcode\v2\setting.json` 自行判断）。它只增删自己那条 provider
+和它名下的 model 规则，其他 provider、`providerOrder` 与手写规则都保持原样；
 `ZCODE_PROVIDER_CONFIG`（绝对路径）可显式指定目标文件。
 
 ## 汇报要求
 
-- 报告桥接目录、端口、已接入区域、**已注册的协议**、每条协议的模型数量与免费模型 id。
+- 报告桥接目录、端口、已接入区域、模型数量与免费模型 id。
 - 报告 `install` 实际写入的配置文件路径（它打在 stderr 上）。
 - 明确说明哪些检查已实测、哪些未验证（例如没做真实调用就别声称调用成功；
-  注册成功不等于请求能通，需要时用 `smoke --protocol <p>` 分别验证）。
+  注册成功不等于请求能通，需要时用 `smoke` 验证）。
 - 提醒用户重启 ZCode 后才会看到 provider。
 - 不要输出任何 token、`bridge.json` 内容或 WorkBuddy 登录文件的字段值。
 
@@ -141,4 +112,3 @@ node "$BRIDGE/src/cli.ts" smoke --region cn --model hy3 --protocol anthropic   #
 - 不修改 WorkBuddy 桌面登录文件；桥接的刷新缓存只写在自己的状态目录里。
 - `smoke` 会真实调用模型，只有在用户同意时才跑，并且优先用免费模型。
 - 卸载时先 `remove`，再停桥接；不要把用户其他 provider 一起清掉。
-  只删其中一种协议时用 `--protocol`，别的协议 provider 必须保留。

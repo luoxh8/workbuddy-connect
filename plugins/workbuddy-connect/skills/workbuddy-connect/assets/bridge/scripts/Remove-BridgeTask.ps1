@@ -21,13 +21,20 @@ function Quote-TaskArgument([string]$Value) {
 
 $taskName = Get-TaskName $resolvedState
 $powerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+$launchScript = Join-Path $PSScriptRoot 'Launch-Bridge.vbs'
 $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($null -eq $task) { Write-Output 'No matching WorkBuddy bridge Scheduled Task was found.'; return }
 
 $action = @($task.Actions)[0]
-$expectedScript = Quote-TaskArgument $runScript
 $expectedState = Quote-TaskArgument $resolvedState
-if ($null -eq $action -or $action.Execute -ne $powerShell -or !$action.Arguments.Contains($expectedScript) -or !$action.Arguments.Contains($expectedState)) {
+# Two layouts are ours: the current wscript launcher and the older direct
+# powershell action. Anything else is a task this installation did not create.
+$isCurrentLayout = $null -ne $action -and $action.Execute -eq $wscript `
+    -and $action.Arguments.Contains((Quote-TaskArgument $launchScript)) -and $action.Arguments.Contains($expectedState)
+$isLegacyLayout = $null -ne $action -and $action.Execute -eq $powerShell `
+    -and $action.Arguments.Contains((Quote-TaskArgument $runScript)) -and $action.Arguments.Contains($expectedState)
+if (!$isCurrentLayout -and !$isLegacyLayout) {
     throw "Scheduled Task '$taskName' does not belong to this bridge installation. It was not changed."
 }
 
