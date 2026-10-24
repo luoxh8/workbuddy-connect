@@ -68,17 +68,16 @@ export function usage(program = programName()): string {
     '  install               register/refresh this bridge as a ZCode provider',
     '  remove                remove only the provider entries this bridge added',
     '  providers             list every provider in the ZCode registry (read-only)',
-    '  prune                 delete providers left by the retired 1.4.x three-protocol',
-    '                        layout; works without the bridge running',
-    '  codex                 list model providers in ~/.codex/config.toml (read-only)',
-    '  prune-codex           delete what the retired install-codex left in Codex: the',
-    '                        marked block, any workbuddy provider table, and its catalog',
-    '  smoke                 one real chat call through the bridge (spends credits).',
+    '  prune                 delete providers left by retired bridge layouts; works',
+    '                        without the bridge running',
+    '  install-codex         register this bridge in ~/.codex/config.toml (Codex CLI',
+    '                        and the ChatGPT desktop app share that file)',
+    '  remove-codex          undo install-codex, keeping unrelated providers',    '  smoke                 one real call through the bridge (spends credits).',
     '                        Requires --region cn|global --model ID',
     '',
-    'The bridge serves one wire protocol only: OpenAI Chat Completions',
-    '(<base>/<region>/v1/chat/completions). Every client that can be pointed at',
-    'an OpenAI-compatible endpoint works against it, so there is nothing to pick.',
+    'The bridge serves one wire protocol only: OpenAI Responses',
+    '(<base>/<region>/v1/responses). ZCode registers it as `openai-responses`, and',
+    'Codex speaks `wire_api = "responses"`, so both clients reach the same route.',
     '',
     'Options:',
     '  --region <auto|cn|global|both>   which region to touch (default: auto)',
@@ -90,6 +89,9 @@ export function usage(program = programName()): string {
     '  --codex-config <path>            Codex config (default: $CODEX_HOME or',
     '                                   ~/.codex/config.toml)',
     '  --free-only                      install: register only free (x0.00) models',
+    '  --keep-default                   install-codex: add the provider and catalog but',
+    '                                   leave model/model_provider pointing where they',
+    '                                   already point',
     '  -h, --help                       this text',
     '  -v, --version                    print the version',
   ].join('\n')
@@ -100,8 +102,8 @@ function initializeArguments(): void {
     args = parseArgs({ allowPositionals: true, options: {
       'state-dir': { type: 'string' }, port: { type: 'string' }, region: { type: 'string' },
       model: { type: 'string' }, prompt: { type: 'string' }, config: { type: 'string' },
-      'codex-config': { type: 'string' },
-      'free-only': { type: 'boolean' },
+      'codex-config': { type: 'string' }, 'codex-catalog': { type: 'string' },
+      'free-only': { type: 'boolean' }, 'keep-default': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
     } })
   } catch (error: any) {
@@ -218,20 +220,6 @@ export async function main(): Promise<void> {
     if (removalIsBlocked(reports)) process.exitCode = 2
     return
   }
-  if (command === 'codex') {
-    const { defaultCodexConfigPath, listCodexProviders } = await import('./codex-cleanup.ts')
-    const configPath = args.values['codex-config'] ?? defaultCodexConfigPath()
-    const providers = await listCodexProviders(configPath)
-    console.log(JSON.stringify({ codexConfig: configPath, providers }, null, 2))
-    return
-  }
-  if (command === 'prune-codex') {
-    const { defaultCodexConfigPath, pruneCodex } = await import('./codex-cleanup.ts')
-    const configPath = args.values['codex-config'] ?? defaultCodexConfigPath()
-    const report = await pruneCodex(args.values['codex-config'] === undefined ? {} : { configPath })
-    console.log(JSON.stringify(report, null, 2))
-    return
-  }
   let config: State
   try {
     config = await state(command === 'serve')
@@ -313,6 +301,32 @@ export async function main(): Promise<void> {
       method: 'POST', body: JSON.stringify(smokeBody(args.values.model, args.values.prompt)),
     })
     console.log(JSON.stringify({ region: regionChoice, model: args.values.model, ...smokeSummary(body) }, null, 2))
+    return
+  }
+  if (command === 'install-codex') {
+    const regions = await selectedInstallRegions(regionChoice)
+    const { defaultCodexConfigPath, installCodex } = await import('./codex.ts')
+    const configPath = args.values['codex-config'] ?? defaultCodexConfigPath()
+    const reports = await installCodex({
+      bridgeUrl: baseUrl, token: config.token, regions,
+      ...args.values['codex-config'] === undefined ? {} : { configPath: args.values['codex-config'] },
+      ...args.values['codex-catalog'] === undefined ? {} : { catalogPath: args.values['codex-catalog'] },
+      ...args.values['free-only'] === true ? { freeOnly: true } : {},
+      ...args.values['keep-default'] === true ? { keepDefaultProvider: true } : {},
+    })
+    console.log(JSON.stringify(reports, null, 2))
+    // Codex reads one catalog file; name it so the merge note is actionable.
+    console.error(`codex config: ${configPath}`)
+    console.error('restart the ChatGPT desktop app (or start a new codex session) to pick up the change')
+    return
+  }
+  if (command === 'remove-codex') {
+    const { removeCodex } = await import('./codex.ts')
+    const report = await removeCodex({
+      ...args.values['codex-config'] === undefined ? {} : { configPath: args.values['codex-config'] },
+      ...args.values['codex-catalog'] === undefined ? {} : { catalogPath: args.values['codex-catalog'] },
+    })
+    console.log(JSON.stringify(report, null, 2))
     return
   }
   throw new Error(`Unknown command: ${command}\nRun ${program} --help for usage`)

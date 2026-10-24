@@ -8,7 +8,7 @@
     {
       "name": "workbuddy-connect",
       "source": "./plugins/workbuddy-connect",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "description": "Local WorkBuddy bridge: registers your own WorkBuddy account's models (free ones included) as a ZCode provider.",
       "displayName": "WorkBuddy Connect",
       "displayName_i18n": {

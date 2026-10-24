@@ -94,7 +94,7 @@ test('installs exactly one provider per region without disturbing existing provi
   assert.equal(rules[0].config.access.apiKey, 'sk-user-key')
   const ours = rules[1]
   assert.equal(ours.config.group, 'standard-personal')
-  assert.equal(ours.config.api.type, 'openai-chat-completions')
+  assert.equal(ours.config.api.type, 'openai-responses')
   assert.equal(ours.config.api.baseUrl, 'http://127.0.0.1:10108/cn/v1')
   assert.equal(ours.config.access.apiKey, token)
   assert.deepEqual(ours.config.personalModelIds, ['hy3', 'glm-5.3'])
@@ -109,7 +109,7 @@ test('installs exactly one provider per region without disturbing existing provi
   assert.equal(written.config.modelConfigRules.manualProviderModelRules.length, 1)
 })
 
-test('model metadata mirrors the bridge catalog in chat-completions field names', async t => {
+test('model metadata mirrors the bridge catalog in Responses field names', async t => {
   const f = await fixture()
   t.after(f.cleanup)
   await withFetch(() => catalog([freeRow, paidRow]), () => installZCode({ bridgeUrl, token, regions: ['cn'], configPath: f.path }))
@@ -120,12 +120,12 @@ test('model metadata mirrors the bridge catalog in chat-completions field names'
   assert.equal(hy3.config.properties.inputFormat.supportsImage, true)
   assert.equal(hy3.config.properties.supportsToolCall, true)
   assert.equal(hy3.config.optionSpecs.maxOutputTokens.max, 64000)
-  assert.equal(hy3.config.optionSpecs.maxOutputTokens.map, '{"max_tokens": maxOutputTokens}')
+  assert.equal(hy3.config.optionSpecs.maxOutputTokens.map, '{"max_output_tokens": maxOutputTokens}')
   // A model with no advertised efforts must not offer a reasoning selector.
   assert.equal(hy3.config.optionSpecs.reasoningLevel, undefined)
   const glm = rules.find((rule: any) => rule.modelId === 'glm-5.3')
   assert.deepEqual(glm.config.optionSpecs.reasoningLevel.values, ['low', 'high', 'max'])
-  assert.equal(glm.config.optionSpecs.reasoningLevel.map, '{"reasoning_effort": reasoningLevel}')
+  assert.equal(glm.config.optionSpecs.reasoningLevel.map, '{"reasoning": {"effort": reasoningLevel}}')
 })
 
 test('free-only registration keeps just the zero-credit models', async t => {
@@ -377,7 +377,7 @@ test('installing over the retired three-protocol layout cleans the extra provide
 
   const written = JSON.parse(await readFile(path, 'utf8'))
   assert.deepEqual(written.config.providerConfigRules.providerRules.map((rule: any) => rule.providerId), ['deepseek', 'workbuddy-cn'])
-  assert.equal(written.config.providerConfigRules.providerRules[1].config.api.type, 'openai-chat-completions')
+  assert.equal(written.config.providerConfigRules.providerRules[1].config.api.type, 'openai-responses')
   assert.deepEqual(written.config.modelConfigRules.providerModelRules.map((rule: any) => `${rule.providerId}/${rule.modelId}`), [
     'deepseek/deepseek-flash', 'workbuddy-cn/hy3',
   ])
@@ -492,6 +492,7 @@ test('providers lists every registry entry and flags the retired layout', async 
   ])
   assert.deepEqual(providers.map(entry => entry.retired), [false, false, true, true])
   const chat = providers.find(entry => entry.provider === 'workbuddy-cn')
+  // The fixture is the 1.4.x layout, where this id carried chat completions.
   assert.equal(chat.apiType, 'openai-chat-completions')
   assert.equal(chat.baseUrl, 'http://127.0.0.1:10108/cn/v1')
   assert.equal(chat.modelRules, 1)

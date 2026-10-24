@@ -6,6 +6,7 @@ import { prepareChatBody, normalizeCredits, WorkBuddyUpstreamClient, type WorkBu
 import { CompletionAccumulator, readSse } from './sse.ts'
 import { packageVersion } from './version.ts'
 import { shapeChatBody, shapeOptionsFromEnv, type ShapeOptions } from './shape.ts'
+import { responsesToChat, chatToResponsesObject, ResponsesStreamEncoder, type FrameWriter } from './responses.ts'
 
 export type Region = WorkBuddyRegion
 export interface RegionStore {
@@ -25,12 +26,26 @@ export interface BridgeOptions {
 const errorStatus = { hard_credit: 402, soft_rate: 429, session_dead: 401, not_found: 404, server: 502, client: 400 }
 const MAX_BODY = 64 * 1024 * 1024
 
+/** The one wire protocol this bridge serves, in ZCode's `api.type` spelling. */
+export const PROTOCOL = 'openai-responses'
+
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(JSON.stringify(body))
 }
+
+/** Responses error types, aligned with the OpenAI SDK's mapping. */
+function responsesErrorType(status: number): string {
+  if (status === 401) return 'authentication_error'
+  if (status === 403) return 'permission_error'
+  if (status === 404) return 'not_found_error'
+  if (status === 429) return 'rate_limit_error'
+  if (status >= 500) return 'server_error'
+  return 'invalid_request_error'
+}
+
 function fail(res: ServerResponse, status: number, code: string, message: string): void {
-  json(res, status, { error: { type: code, code, message } })
+  json(res, status, { error: { message, type: responsesErrorType(status), code } })
 }
 
 async function readJson(req: IncomingMessage): Promise<any> {
@@ -106,6 +121,7 @@ export function createBridge(options: BridgeOptions) {
     res.on('close', abort)
     const timeout = setTimeout(() => controller.abort(new Error('WorkBuddy request timed out')), options.timeoutMs ?? 5 * 60_000)
     timeout.unref()
+    let encoder: ResponsesStreamEncoder | undefined
     try {
       if (!hostIsLoopback(req.headers.host) || !originIsLoopback(req.headers.origin)) {
         fail(res, 403, 'origin_not_allowed', 'Only localhost requests are accepted'); return
@@ -124,9 +140,7 @@ export function createBridge(options: BridgeOptions) {
         })))
         json(res, 200, {
           regions,
-          // One protocol, one route set: OpenAI Chat Completions. Clients that
-          // speak something else are normalised by their own side.
-          protocol: 'openai-chat-completions',
+          protocol: PROTOCOL,
           shape: {
             ...shapeStats,
             maxBytes: shapeOptions.maxBytes,
@@ -136,7 +150,7 @@ export function createBridge(options: BridgeOptions) {
           },
         }); return
       }
-      const match = /^\/(cn|global)\/v1\/(models|chat\/completions|credits)$/.exec(path)
+      const match = /^\/(cn|global)\/v1\/(models|responses|credits)$/.exec(path)
       if (match === null) { fail(res, 404, 'not_found', 'Unknown bridge route'); return }
       const region = match[1] as Region
       const route = match[2]
@@ -149,7 +163,7 @@ export function createBridge(options: BridgeOptions) {
       if (req.method === 'GET' && route === 'credits') {
         json(res, 200, await client.fetchCredits(credential)); return
       }
-      if (req.method !== 'POST' || route !== 'chat/completions') {
+      if (req.method !== 'POST' || route !== 'responses') {
         fail(res, 405, 'method_not_allowed', 'Unsupported HTTP method'); return
       }
       if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] ?? '')) {
@@ -159,9 +173,11 @@ export function createBridge(options: BridgeOptions) {
       if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.model !== 'string') {
         fail(res, 400, 'invalid_request', 'A model is required'); return
       }
-      const chat: Record<string, any> = body
+      // The rest of this handler speaks chat completions: the Responses request
+      // is rewritten once, and the upstream stream is re-encoded on the way out.
+      const chat: Record<string, any> = responsesToChat(body)
       if (!Array.isArray(chat['messages']) || chat['messages'].length === 0) {
-        fail(res, 400, 'invalid_request', 'A non-empty messages array is required'); return
+        fail(res, 400, 'invalid_request', 'A non-empty input is required'); return
       }
       const catalog = await models(region, credential)
       const model = catalog.find(m => m.id === body.model)
@@ -174,7 +190,7 @@ export function createBridge(options: BridgeOptions) {
       }
       const stream = body.stream === true
       // Global WorkBuddy rejects a user-first conversation with code 11128.
-      // Developer messages become system in prepareChatBody below.
+      // Developer messages become system in responsesToChat / prepareChatBody.
       if (region === 'global' && !['system', 'developer'].includes(chat['messages'][0]?.role)) {
         chat['messages'].unshift({ role: 'system', content: 'You are a helpful coding assistant.' })
       }
@@ -212,6 +228,11 @@ export function createBridge(options: BridgeOptions) {
       if (stream) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' })
         res.flushHeaders()
+        const sink: FrameWriter = async frame => {
+          if (!res.write(frame)) await once(res, 'drain', { signal: controller.signal })
+        }
+        encoder = new ResponsesStreamEncoder(sink, model.id)
+        await encoder.start()
       }
       const accumulator = new CompletionAccumulator()
       let sawDone = false
@@ -223,17 +244,24 @@ export function createBridge(options: BridgeOptions) {
         if (chunk.error) throw new Error('Upstream stream reported an error')
         if (chunk.choices?.some((choice: any) => choice.finish_reason)) finished = true
         accumulator.add(chunk)
-        if (stream && !res.write(`data: ${payload}\n\n`)) await once(res, 'drain', { signal: controller.signal })
+        if (encoder !== undefined) await encoder.push(chunk)
       }
       if (!sawDone || !finished) throw new Error('Upstream stream ended before completion')
-      if (stream) res.end('data: [DONE]\n\n')
-      else json(res, 200, accumulator.result())
+      if (stream) {
+        await encoder!.finish()
+        res.end()
+      } else {
+        json(res, 200, chatToResponsesObject(accumulator.result(), model.id))
+      }
     } catch (error: any) {
       if (res.destroyed) return
       if (!res.headersSent) {
         fail(res, error.status ?? 502, 'bridge_error', error.status ? error.message : 'WorkBuddy request failed; retry or check the desktop login and network')
+      } else if (encoder !== undefined) {
+        await encoder.fail('WorkBuddy stream interrupted; retry the request')
+        res.end()
       } else {
-        res.end(`data: ${JSON.stringify({ error: { type: 'upstream_stream_error', message: 'WorkBuddy stream interrupted; retry the request' } })}\n\n`)
+        res.end()
       }
     } finally {
       clearTimeout(timeout)

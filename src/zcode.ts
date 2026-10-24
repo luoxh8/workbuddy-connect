@@ -9,9 +9,9 @@
  * so every write is a full-document atomic replace that preserves unrelated
  * providers, rules and ordering.
  *
- * One provider per region, speaking OpenAI Chat Completions: that is the wire
- * format every client understands, and it is the shape WorkBuddy upstream
- * answers in, so nothing is translated in between.
+ * One provider per region. ZCode supports `openai-responses` as an `api.type`,
+ * and that is the same wire format Codex CLI requires, so a Responses-only
+ * bridge reaches both clients with a single protocol.
  *
  * Only the bridge's own entries are ever touched: a provider is claimed by
  * `providerId`, and removal additionally re-checks the stored base URL and API
@@ -101,12 +101,19 @@ const REQUEST_TIMEOUT_MS = 30_000
 const SUPPORTED_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 
 /** The single wire format this bridge speaks, in ZCode's `config.api.type` spelling. */
-const API_TYPE = 'openai-chat-completions'
+const API_TYPE = 'openai-responses'
 
 /**
- * Providers written by bridge versions ≤1.4, which registered one provider per
- * protocol. They are still recognised so an upgrade (or `remove`) can clean up
- * instead of leaving three dead entries per region behind.
+ * Every `api.type` this bridge has ever written for its main provider id:
+ * 2.2+ writes responses, 2.0–2.1 wrote chat completions. Both are recognised as
+ * ours so an upgrade path can always update or remove the entry it finds.
+ */
+const MAIN_PROVIDER_TYPES: readonly string[] = [API_TYPE, 'openai-chat-completions']
+
+/**
+ * Providers written by bridge versions ≤2.1, which registered a different
+ * protocol set per version. They are still recognised so an upgrade (or
+ * `remove` / `prune`) can clean up instead of leaving dead entries behind.
  */
 const LEGACY_SUFFIXES = ['-anthropic', '-responses'] as const
 
@@ -135,12 +142,12 @@ export function legacyProviderIdsFor(region: ZCodeRegion): string[] {
 /**
  * The `api.type` each retired suffix was created with. A provider whose id and
  * type still match this signature, and whose base URL is a loopback region
- * endpoint, was written by the 1.4.x installer and nothing else — so `prune`
+ * endpoint, was written by an older installer and nothing else — so `prune`
  * can recognise it without knowing which port the bridge runs on now.
  */
-function legacyApiTypeFor(providerId: string): string | undefined {
-  if (providerId.endsWith('-anthropic')) return 'anthropic-messages'
-  if (providerId.endsWith('-responses')) return 'openai-responses'
+function legacyApiTypesFor(providerId: string): readonly string[] | undefined {
+  if (providerId.endsWith('-anthropic')) return ['anthropic-messages']
+  if (providerId.endsWith('-responses')) return ['openai-responses']
   return undefined
 }
 
@@ -278,7 +285,7 @@ function bridgeModels(body: unknown, freeOnly: boolean): { models: BridgeModel[]
 }
 
 /**
- * The optionSpecs map for a chat-completions provider.
+ * The optionSpecs map for an OpenAI Responses provider.
  *
  * These strings are evaluated by ZCode inside the request body, so they have to
  * use this protocol's own field names — the bridge then reads the same names
@@ -287,10 +294,10 @@ function bridgeModels(body: unknown, freeOnly: boolean): { models: BridgeModel[]
 function optionMaps(efforts: readonly string[], maxTokens: number | undefined): JsonRecord {
   const optionSpecs: JsonRecord = {}
   if (efforts.length > 0) {
-    optionSpecs['reasoningLevel'] = { values: [...efforts], map: '{"reasoning_effort": reasoningLevel}' }
+    optionSpecs['reasoningLevel'] = { values: [...efforts], map: '{"reasoning": {"effort": reasoningLevel}}' }
   }
   if (maxTokens !== undefined) {
-    optionSpecs['maxOutputTokens'] = { max: maxTokens, map: '{"max_tokens": maxOutputTokens}' }
+    optionSpecs['maxOutputTokens'] = { max: maxTokens, map: '{"max_output_tokens": maxOutputTokens}' }
   }
   return optionSpecs
 }
@@ -354,12 +361,12 @@ function isOwnProvider(rule: unknown, providerId: string): boolean {
  * `expectedType` is omitted for the retired multi-protocol entries, whose
  * `api.type` depends on which protocol that old version registered.
  */
-function ownsBaseUrl(rule: JsonRecord, region: ZCodeRegion, expectedType?: string): boolean {
+function ownsBaseUrl(rule: JsonRecord, region: ZCodeRegion, expectedTypes?: readonly string[]): boolean {
   const config = rule['config']
   if (!isRecord(config)) return false
   const api = config['api']
   if (!isRecord(api) || typeof api['baseUrl'] !== 'string') return false
-  if (expectedType !== undefined && api['type'] !== expectedType) return false
+  if (expectedTypes !== undefined && !expectedTypes.includes(String(api['type']))) return false
   try {
     const parsed = new URL(api['baseUrl'])
     const hostname = parsed.hostname.toLowerCase()
@@ -516,11 +523,12 @@ export async function removeZCode(options: ZCodeRemoveOptions = {}): Promise<ZCo
 
   for (const region of regions) {
     const expectedBase = options.bridgeUrl === undefined ? undefined : bridgeRegionBaseUrl(options.bridgeUrl, region)
-    const targets: Array<{ providerId: string, expectedType?: string }> = [
-      { providerId: providerIdFor(region), expectedType: API_TYPE },
-      ...legacyProviderIdsFor(region).map(providerId => ({ providerId })),
+    const targets: Array<{ providerId: string, expectedTypes?: readonly string[] }> = [
+      // The main provider may still carry the chat-completions type from 2.0/2.1.
+      { providerId: providerIdFor(region), expectedTypes: MAIN_PROVIDER_TYPES },
+      ...legacyProviderIdsFor(region).map(providerId => ({ providerId, expectedTypes: legacyApiTypesFor(providerId) })),
     ]
-    for (const { providerId, expectedType } of targets) {
+    for (const { providerId, expectedTypes } of targets) {
       const index = rules.findIndex(rule => isOwnProvider(rule, providerId))
       if (index === -1) {
         reports.push({ provider: providerId, region, action: 'skipped', reason: 'not_found' })
@@ -533,9 +541,9 @@ export async function removeZCode(options: ZCodeRemoveOptions = {}): Promise<ZCo
       // Without an explicit bridge URL, ownership is structural: the stored base
       // URL must be a loopback endpoint for this very region.
       const owned = expectedBase === undefined
-        ? ownsBaseUrl(rule, region, expectedType)
+        ? ownsBaseUrl(rule, region, expectedTypes)
         : storedApi !== undefined
-          && (expectedType === undefined || storedApi['type'] === expectedType)
+          && (expectedTypes === undefined || expectedTypes.includes(String(storedApi['type'])))
           && storedApi['baseUrl'] === expectedBase
       if (!owned) {
         reports.push({ provider: providerId, region, action: 'skipped', reason: 'not_owned' })
@@ -586,7 +594,7 @@ export async function pruneLegacyZCode(options: { regions?: readonly ZCodeRegion
         reports.push({ provider: providerId, region, action: 'skipped', reason: 'not_found' })
         continue
       }
-      if (!ownsBaseUrl(rule, region, legacyApiTypeFor(providerId))) {
+      if (!ownsBaseUrl(rule, region, legacyApiTypesFor(providerId))) {
         reports.push({ provider: providerId, region, action: 'skipped', reason: 'not_owned' })
         continue
       }

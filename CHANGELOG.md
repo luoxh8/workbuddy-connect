@@ -2,6 +2,40 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.2.0] - 2026-10-24
+
+**协议定为 OpenAI Responses。** 2.0 把三协议砍成一种时选了 Chat Completions，理由是"最通用"；
+但用户实际要的是**让 Codex CLI 也能接**，而 Codex 二进制里明确写着
+`` `wire_api = "chat"` is no longer supported ``，只认 `responses`。ZCode 两种都支持，
+所以选 Responses 能同时覆盖两边，选 Chat Completions 则永远接不上 Codex。
+
+### Changed
+
+- **唯一协议从 Chat Completions 改为 OpenAI Responses**：路由是 `POST /<region>/v1/responses`，
+  `/v1/chat/completions` 现在返回 404。`/status` 的 `protocol` 字段是 `openai-responses`。
+- `src/protocols.ts` 删掉后重建成 `src/responses.ts`（只保留 Responses 一个方向的编解码），
+  从 v1.4.0 取回实现，去掉 Anthropic 那一半。流式事件按 AI SDK / Codex 的 parser 写：
+  `response.created → output_item.added → *_text.delta → output_item.done → response.completed`。
+- ZCode provider 的 `api.type` 改为 `openai-responses`，`optionSpecs` 相应改成
+  `{"reasoning": {"effort": ...}}` 与 `{"max_output_tokens": ...}`。
+- 恢复 `install-codex` / `remove-codex`（`src/codex.ts` 从 v1.4.0 取回）。现在它写下的
+  `wire_api = "responses"` 和桥的路由一致，所以真的能跑通。
+
+### Added
+
+- **`install-codex --keep-default`**：写 provider 表和合并后的目录，但不动 `model` /
+  `model_provider`。Codex 继续走用户原本的路由（例如直连官方），模型选择器里多出本桥的模型，
+  想用时手选。目录仍会被改成合并后的文件——Codex 只读一个目录，这是让列表里出现桥模型的唯一办法，
+  而合并会把原有模型一起带进来，不会丢。
+- 恢复 Codex 测试 14 个；测试总数 81。
+
+### Verified on this machine (2026-10-24)
+
+- `codex exec` 默认配置 → `DIRECT_OK`（仍直连 DeepSeek 官方）
+- `codex exec -c model_provider=workbuddy -c model=hy3` → `VIA_BRIDGE_OK`（走本桥）
+- ZCode 注册表：`workbuddy-cn` 变成 `openai-responses`，18 个模型
+- 桥 `/status` 返回 `protocol: openai-responses`；`/v1/chat/completions` 返回 404
+
 ## [2.1.0] - 2026-10-24
 
 ### Added

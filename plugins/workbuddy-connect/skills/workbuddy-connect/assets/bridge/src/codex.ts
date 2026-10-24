@@ -37,6 +37,13 @@ export interface CodexInstallOptions {
   regions?: readonly CodexRegion[]
   /** Register only models WorkBuddy bills at zero credits. */
   freeOnly?: boolean
+  /**
+   * Register the provider and the merged catalog but leave `model` and
+   * `model_provider` alone. Codex keeps its current default route, while the
+   * bridge's models still show up in the picker for a manual switch — useful
+   * when the user has another provider they do not want silently replaced.
+   */
+  keepDefaultProvider?: boolean
   /** Test/portable override; defaults to `$CODEX_HOME/config.toml`. */
   configPath?: string
   /** Test/portable override for the catalog; defaults to a fixed name next to the config. */
@@ -139,7 +146,7 @@ export function codexProviderName(region: CodexRegion): string {
   return region === 'cn' ? 'WorkBuddy CN' : 'WorkBuddy Global'
 }
 
-/** The bridge serves all three protocols from `/<region>/v1`; Codex wants Responses. */
+/** The bridge serves Responses from `/<region>/v1`; that is exactly what Codex wants. */
 export function codexBaseUrl(bridgeUrl: string, region: CodexRegion): string {
   return `${bridgeUrl.replace(/\/+$/, '')}/${region}/v1`
 }
@@ -524,12 +531,21 @@ export async function installCodex(options: CodexInstallOptions): Promise<CodexI
   const bridgeSlugs = new Set((planned.catalog['models'] as Array<Record<string, unknown>>).map(model => String(model['slug'])))
   const currentModel = activeModelFromConfig(withoutBlock.text)
   const fallbackModel = preferredModel(planned.catalog)
-  const modelEntry = currentModel !== undefined && bridgeSlugs.has(currentModel)
+  // `keepDefaultProvider` leaves `model` and `model_provider` pointing where they
+  // already point, but still repoints the catalog at the merged file: Codex reads
+  // exactly one catalog, so that is the only way its picker can show this
+  // bridge's models without also rerouting the default provider. The catalog is
+  // a superset (the previous one's models are merged in), so nothing is lost.
+  const keepDefault = options.keepDefaultProvider === true
+  const modelEntry = keepDefault || (currentModel !== undefined && bridgeSlugs.has(currentModel))
     ? {}
     : fallbackModel === undefined ? {} : { model: tomlString(fallbackModel) }
+  const routed = keepDefault
+    ? { model_provider: rawRootValue(withoutBlock.text, 'model_provider'), model_catalog_json: tomlString(catalogPath) }
+    : { model_provider: tomlString(planned.activeProvider), model_catalog_json: tomlString(catalogPath) }
   const rooted = setRootKeys(withoutBlock.text, {
-    model_provider: tomlString(planned.activeProvider),
-    model_catalog_json: tomlString(catalogPath),
+    ...(routed.model_provider === undefined ? {} : { model_provider: routed.model_provider }),
+    model_catalog_json: routed.model_catalog_json,
     ...modelEntry,
   })
   const next = `${rooted.text.replace(/\s+$/, '')}\n\n${planned.providers}\n`

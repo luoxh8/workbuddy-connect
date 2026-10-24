@@ -4,35 +4,35 @@
 [![license](https://img.shields.io/npm/l/workbuddy-connect.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/workbuddy-connect.svg)](package.json)
 
-把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型，变成一个本机 **OpenAI 兼容接口** ——
+把 **WorkBuddy 国内版 / 国际版**里**你自己账号**的模型，变成一个本机 **OpenAI Responses 接口** ——
 免费模型（`hy3`、`step-5-preview` 等）也在内。两个区域可以任选一个，也可以同时使用。
 
-**只有一种协议：OpenAI Chat Completions。** 这是几乎所有客户端都认的通用格式，也是
-WorkBuddy 上游本身回答的格式，所以桥里面没有协议翻译层——请求进去什么样，转发出去就是什么样。
+**只有一种协议：OpenAI Responses。** 选它是因为它同时被两个目标客户端接受：
+ZCode 的 `api.type = "openai-responses"`，Codex CLI 的 `wire_api = "responses"`（新版只认这个）。
+换成 Chat Completions 会少接一个客户端，多留一种协议则要多养一套编解码。
 
 | 用途 | 路径（以 `cn` 为例） | 认证头 |
 |---|---|---|
-| 对话 | `POST /cn/v1/chat/completions` | `Authorization: Bearer <key>` |
+| 对话 | `POST /cn/v1/responses` | `Authorization: Bearer <key>` |
 | 模型目录 | `GET /cn/v1/models` | `Authorization: Bearer <key>` |
 | 剩余积分 | `GET /cn/v1/credits` | `Authorization: Bearer <key>` |
 
-`x-api-key: <key>` 也接受，方便只发这个头的客户端。Vercel AI SDK、LangChain、OpenWebUI、
-Chatbox、Cherry Studio、Dify、n8n……只要它能填一个 OpenAI 兼容的 base URL 就能接。
+`x-api-key: <key>` 也接受，方便只发这个头的客户端。
 
-> **为什么 2.0 去掉了 Anthropic Messages 和 OpenAI Responses？** 这两种协议各自要维护一整套请求
-> 改写、流式事件重编码和错误信封映射，而它们能连上的客户端**同时都能连 Chat Completions**——
-> 三份代码换不来多一个可用客户端。真遇到**只**说 Anthropic / Responses 的客户端
-> （例如新版 Codex CLI 强制 `wire_api = "responses"`），用 1.4.x 的 tag，或在客户端前面挂一个只说
-> 那一种协议的转发器。
+> **协议演进（一句话）**：1.3 加过 Anthropic Messages + Responses 三协议，2.0 砍到只剩
+> Chat Completions，2.2 定为只剩 Responses —— 因为 Codex CLI 二进制里写着
+> `` `wire_api = "chat"` is no longer supported ``，而 Responses 两家客户端都认。要三协议或
+> 要 Chat Completions 的，用对应的 tag（`v1.4.0` / `v2.1.0`）。
 
 支持**直接接入**的客户端（不用手写配置）：
 
-- **ZCode** —— 见「方法一 / 方法二」
+- **ZCode** —— `install`，注册为 `openai-responses` provider
+- **ChatGPT 桌面版 / Codex CLI** —— `install-codex`，见对应章节
 
 ```text
-任意 OpenAI 兼容客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
-                          ├─ WorkBuddy CN/模型名称
-                          └─ WorkBuddy Global/模型名称
+ZCode / Codex / 任意 Responses 客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
+                                        ├─ WorkBuddy CN/模型名称
+                                        └─ WorkBuddy Global/模型名称
 ```
 
 **消耗的是你自己 WorkBuddy 账号的积分。** 免费模型（倍率 `x0.00`，例如 `hy3`、`step-5-preview`）
@@ -45,7 +45,7 @@ WorkBuddy 桌面端把模型藏在它自己的登录态后面，客户端拿不�
 所以本项目的做法是：
 
 1. 一个只跑在 `127.0.0.1` 的本地桥接进程，用你自己 WorkBuddy 桌面端的登录态去访问
-   WorkBuddy 的模型接口，对外提供 **OpenAI Chat Completions**（外加 `/v1/models` 与 `/v1/credits`）；
+   WorkBuddy 的模型接口，对外提供 **OpenAI Responses**（外加 `/v1/models` 与 `/v1/credits`）；
 2. 一个可选的安装命令，把桥接注册成 **ZCode 的自定义 provider**（每个区域一条）：
    默认写 `%USERPROFILE%\.zcode\v2\provider_config.json`；
    改过数据目录则写 `<数据目录>\.zcode\v2\provider_config.json`）。其它客户端不需要这一步，
@@ -115,33 +115,53 @@ workbuddy-connect serve                 # 前台跑桥接（默认 127.0.0.1:101
 包内自带 .ts 类型擦除的 loader，装进 `node_modules` 也能跑（Node ≥ 22.18）；
 `npm i` 不触发任何生命周期脚本，注册 provider 必须显式跑 `workbuddy-connect install`。
 
-## 接入 ChatGPT 桌面版 / Codex CLI（2.0 起不再支持）
+## 接入 ChatGPT 桌面版 / Codex CLI
 
-新版 Codex CLI / ChatGPT 桌面版**强制 `wire_api = "responses"`**，二进制里直接写着
-`wire_api = "chat"` is no longer supported，而本桥只提供 Chat Completions，所以 2.0 起
-`install-codex` / `remove-codex` 两个命令已移除。
-
-需要把 WorkBuddy 接进 Codex 时用 **1.4.x** 的 tag，或让 Codex 直连官方端点
-（DeepSeek 官方 `POST https://api.deepseek.com/responses` 已可用）。
-
-**清理旧版本留下的痕迹**（不需要桥在跑）：
+Windows 上的 **ChatGPT 桌面版就是 Codex**（MSIX 包名 `OpenAI.Codex`，显示名 `ChatGPT`）：
+它和 `codex` 命令行读**同一份** `~/.codex/config.toml`、同一个模型目录。所以一条命令同时接两边：
 
 ```powershell
-node src/cli.ts codex          # 列出 ~/.codex/config.toml 里的全部 model provider（只读）
-node src/cli.ts prune-codex    # 删掉 install-codex 留下的东西
+node src/cli.ts install-codex --region cn
+# 装成 npm 包后：workbuddy-connect install-codex --region cn
 ```
 
-`codex` 会把注释掉的表也读出来并标 `active: false` / `retired: true`——1.4.x 的块即使被注释，
-**仍然以明文存着桥的本地 API key**，所以停用不等于清除。
+它做三件事，全部写在 `# >>> workbuddy-connect >>>` 标记块里，可逆：
 
-`prune-codex` 删三样东西，都不碰别的 provider：
+1. 在 `config.toml` 追加 `[model_providers.workbuddy]`，
+   `wire_api = "responses"`，`base_url = http://127.0.0.1:10108/cn/v1`；
+2. 把 `model_provider` / `model_catalog_json` 指向本桥，`model` 默认落到**免费模型**；
+3. 生成 `<config 同目录>/workbuddy-models.json`——把 `/v1/models` 的每个模型写成 Codex 能读的
+   目录条目（上下文窗口、视觉输入、推理档位、优先级）。
 
-1. `# >>> workbuddy-connect >>>` … `# <<< workbuddy-connect <<<` 整块（含其中的 token）；
-2. 标记块之外残留的 `[model_providers.workbuddy*]` 表；
-3. 同目录生成的 `workbuddy-models.json`——**只有当没有生效中的 `model_catalog_json` 指向它时才删**。
+然后**重启 ChatGPT 桌面版**（或开新的 `codex` 会话），模型选择器里就有这些模型了。
 
-`desktop` / `tui` / `mcp_servers` / `hooks` / `marketplaces` 等其它表逐字节保留。
-自定义位置用 `--codex-config <path>`；默认跟随 `$CODEX_HOME`。
+### 只加进列表、不改默认路由：`--keep-default`
+
+Codex 的 `model_provider` 是**全局**设置，一个目录文件里混着多个 provider 的模型，但默认只走一个。
+如果你已经有自己配好的 provider（比如直连 DeepSeek 官方）不想被替换：
+
+```powershell
+node src/cli.ts install-codex --region cn --keep-default
+```
+
+它照样写 `[model_providers.workbuddy]`，并把目录指向合并后的 `workbuddy-models.json`
+（原有目录里的模型会一起并进来，一个不丢），但**不动 `model` 和 `model_provider`**——
+Codex 继续走原来的路由，只是模型选择器里多了本桥的模型，想用的时候手选即可。
+
+```powershell
+node src/cli.ts install-codex --region cn --free-only   # 只放免费模型
+node src/cli.ts install-codex --region both             # 国内 + 国际
+node src/cli.ts remove-codex                            # 撤回，逐字节还原 config.toml
+```
+
+自定义位置：`--codex-config <path>`、`--codex-catalog <path>`；默认跟随 `$CODEX_HOME`。
+
+**不覆盖你已有的模型目录**：Codex 只能读一个目录文件。如果 `config.toml` 里的
+`model_catalog_json` 已指向别处（例如你另外配的 DeepSeek 代理），install 会把那个目录里的模型
+**合并**进新目录，安装报告里会写明转移了几个。
+
+`remove-codex` 会连 `model` / `model_provider` / `model_catalog_json` 一起还原成安装前的值
+（块内 `# restore` 注释记录了原始根键），并删掉自己生成的目录文件。
 
 
 ## 日常使用
@@ -188,9 +208,9 @@ node src/cli.ts smoke --region cn --model hy3
 
 本地 API：
 
-- `GET /healthz`、`GET /status`（`/status` 的 `protocol` 字段是 `openai-chat-completions`）
-- `GET /cn/v1/{models,credits}`、`POST /cn/v1/chat/completions`
-- `GET /global/v1/{models,credits}`、`POST /global/v1/chat/completions`
+- `GET /healthz`、`GET /status`（`/status` 的 `protocol` 字段是 `openai-responses`）
+- `GET /cn/v1/{models,credits}`、`POST /cn/v1/responses`
+- `GET /global/v1/{models,credits}`、`POST /global/v1/responses`
 
 所有接口都需要桥接自己的本地密钥（安装时自动生成）：主用 `Authorization: Bearer`，
 也接受 `x-api-key`。不需要手工粘贴 WorkBuddy token。

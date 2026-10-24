@@ -1,7 +1,7 @@
 {
   "name": "workbuddy-connect",
-  "version": "2.1.0",
-  "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account's models (free ones included) into one OpenAI Chat Completions endpoint any client can use",
+  "version": "2.2.0",
+  "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account models (free ones included) into one OpenAI Responses endpoint for ZCode and Codex CLI",
   "type": "module",
   "bin": {
     "workbuddy-connect": "bin/cli.mjs"
@@ -34,9 +34,10 @@
     "workbuddy",
     "openai-compatible",
     "openai",
+    "responses",
     "bridge",
-    "chat-completions",
     "zcode",
+    "codex",
     "cli"
   ],
   "author": {
