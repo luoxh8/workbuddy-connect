@@ -70,6 +70,9 @@ export function usage(program = programName()): string {
     '  providers             list every provider in the ZCode registry (read-only)',
     '  prune                 delete providers left by the retired 1.4.x three-protocol',
     '                        layout; works without the bridge running',
+    '  codex                 list model providers in ~/.codex/config.toml (read-only)',
+    '  prune-codex           delete what the retired install-codex left in Codex: the',
+    '                        marked block, any workbuddy provider table, and its catalog',
     '  smoke                 one real chat call through the bridge (spends credits).',
     '                        Requires --region cn|global --model ID',
     '',
@@ -84,6 +87,8 @@ export function usage(program = programName()): string {
     '  --state-dir <path>               bridge home (default: ~/.workbuddy-connect)',
     '  --port <1024-65535>              bridge port (default: 10108)',
     '  --config <path>                  ZCode provider config to edit',
+    '  --codex-config <path>            Codex config (default: $CODEX_HOME or',
+    '                                   ~/.codex/config.toml)',
     '  --free-only                      install: register only free (x0.00) models',
     '  -h, --help                       this text',
     '  -v, --version                    print the version',
@@ -95,6 +100,7 @@ function initializeArguments(): void {
     args = parseArgs({ allowPositionals: true, options: {
       'state-dir': { type: 'string' }, port: { type: 'string' }, region: { type: 'string' },
       model: { type: 'string' }, prompt: { type: 'string' }, config: { type: 'string' },
+      'codex-config': { type: 'string' },
       'free-only': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
     } })
@@ -210,6 +216,20 @@ export async function main(): Promise<void> {
     })
     console.log(JSON.stringify({ providerConfig: configPath, reports }, null, 2))
     if (removalIsBlocked(reports)) process.exitCode = 2
+    return
+  }
+  if (command === 'codex') {
+    const { defaultCodexConfigPath, listCodexProviders } = await import('./codex-cleanup.ts')
+    const configPath = args.values['codex-config'] ?? defaultCodexConfigPath()
+    const providers = await listCodexProviders(configPath)
+    console.log(JSON.stringify({ codexConfig: configPath, providers }, null, 2))
+    return
+  }
+  if (command === 'prune-codex') {
+    const { defaultCodexConfigPath, pruneCodex } = await import('./codex-cleanup.ts')
+    const configPath = args.values['codex-config'] ?? defaultCodexConfigPath()
+    const report = await pruneCodex(args.values['codex-config'] === undefined ? {} : { configPath })
+    console.log(JSON.stringify(report, null, 2))
     return
   }
   let config: State

@@ -121,11 +121,27 @@ workbuddy-connect serve                 # 前台跑桥接（默认 127.0.0.1:101
 `wire_api = "chat"` is no longer supported，而本桥只提供 Chat Completions，所以 2.0 起
 `install-codex` / `remove-codex` 两个命令已移除。
 
-需要把 WorkBuddy 接进 Codex 时有两个选择：
+需要把 WorkBuddy 接进 Codex 时用 **1.4.x** 的 tag，或让 Codex 直连官方端点
+（DeepSeek 官方 `POST https://api.deepseek.com/responses` 已可用）。
 
-1. 用 **1.4.x** 的 tag（那版带 Responses 路由和 Codex 目录生成）；
-2. 让 Codex 直连官方端点——DeepSeek 官方 `POST https://api.deepseek.com/responses` 已可用，
-   本机就是这么配的，中间不需要任何代理。
+**清理旧版本留下的痕迹**（不需要桥在跑）：
+
+```powershell
+node src/cli.ts codex          # 列出 ~/.codex/config.toml 里的全部 model provider（只读）
+node src/cli.ts prune-codex    # 删掉 install-codex 留下的东西
+```
+
+`codex` 会把注释掉的表也读出来并标 `active: false` / `retired: true`——1.4.x 的块即使被注释，
+**仍然以明文存着桥的本地 API key**，所以停用不等于清除。
+
+`prune-codex` 删三样东西，都不碰别的 provider：
+
+1. `# >>> workbuddy-connect >>>` … `# <<< workbuddy-connect <<<` 整块（含其中的 token）；
+2. 标记块之外残留的 `[model_providers.workbuddy*]` 表；
+3. 同目录生成的 `workbuddy-models.json`——**只有当没有生效中的 `model_catalog_json` 指向它时才删**。
+
+`desktop` / `tui` / `mcp_servers` / `hooks` / `marketplaces` 等其它表逐字节保留。
+自定义位置用 `--codex-config <path>`；默认跟随 `$CODEX_HOME`。
 
 
 ## 日常使用

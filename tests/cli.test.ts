@@ -49,13 +49,16 @@ test('program name follows how the CLI was started', () => {
 
 test('usage names every command and the two universal flags', () => {
   const text = usage('workbuddy-connect')
-  for (const command of ['serve', 'status', 'accounts', 'models', 'install', 'remove', 'providers', 'prune', 'smoke']) {
+  for (const command of ['serve', 'status', 'accounts', 'models', 'install', 'remove', 'providers', 'prune', 'codex', 'prune-codex', 'smoke']) {
     assert.match(text, new RegExp(`\\b${command}\\b`))
   }
   assert.match(text, /--help/)
   assert.match(text, /--version/)
-  // The retired multi-protocol surface must not come back through the help text.
-  assert.doesNotMatch(text, /install-codex|--protocol/)
+  // The retired multi-protocol surface must not come back. Match whole command
+  // names: `prune-codex` legitimately contains the substring `install-codex`'s
+  // counterpart, so a loose substring test would fire on the replacement.
+  assert.doesNotMatch(text, /^\s+install-codex\s/m)
+  assert.doesNotMatch(text, /^\s+--protocol\b/m)
   assert.ok(text.startsWith('Usage: workbuddy-connect'))
 })
 

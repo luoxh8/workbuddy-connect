@@ -2,6 +2,34 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.1.0] - 2026-10-24
+
+### Added
+
+- **`codex` 与 `prune-codex` 两个离线命令**，处理 1.4.x 的 `install-codex` 留在 Codex 侧的东西。
+  停用不等于清除：被注释掉的 `# [model_providers.workbuddy]` 块**仍以明文存着桥的本地 API key**，
+  而生成的 `workbuddy-models.json`（本机 118 KB / 20 个模型）一旦不被引用就只是磁盘垃圾。
+  - `codex`：列出 `~/.codex/config.toml` 里的全部 model provider，注释掉的表也读，
+    标出 `active` 与 `retired`。只读。
+  - `prune-codex`：删三样——标记块整块、标记块外残留的 `[model_providers.workbuddy*]` 表、
+    同目录生成的目录文件。目录文件只在**没有生效中的 `model_catalog_json` 指向它**时才删。
+  - 逐行浅扫，只认 `[model_providers.<id>]` 与其下的键值对：不引入 TOML 依赖，
+    也不重新序列化整份文件，所以 `desktop` / `tui` / `mcp_servers` / `hooks` / `marketplaces`
+    等表逐字节保留。
+- 测试 76 个（新增 10 个 Codex 清理用例：注释表读取、token 随块删除、块外表删除、
+  目录文件删除与保留两个方向、干净配置不写盘、缺文件不创建等）。
+
+## [2.0.1] - 2026-10-24
+
+### Added
+
+- **`providers` 与 `prune` 两个离线命令。** 2.0.0 的清理只挂在 `install` 上，而 `install` 需要桥在跑
+  且账号已登录——桥停着的时候，1.4.x 留下的两条死条目就永远清不掉（它们还标着 `enabled`，
+  但指向 2.0 返回 404 的路由）。新命令只读写 ZCode 的 provider 配置，不碰网络：
+  - `providers`：列出注册表里**全部** provider（含别人的），标出哪些属于已退役布局；
+  - `prune`：只删「id 是 `workbuddy-<region>-anthropic|responses` + `api.type` 仍是当初那个 +
+    baseUrl 是 loopback 同区域路径」三条同时成立的条目，其余跳过并报 `not_owned`。
+
 ## [2.0.0] - 2026-10-24
 
 **破坏性变更：只剩一种协议。** 三协议是 1.3.0 加进来的，但 Anthropic Messages 与 OpenAI Responses
@@ -22,16 +50,10 @@
 
 ### Added
 
-- **`providers` 与 `prune` 两个离线命令。** 上一版的清理只挂在 `install` 上，而 `install` 需要桥在跑
-  且账号已登录——桥停着的时候，1.4.x 留下的两条死条目就永远清不掉（它们还标着 `enabled`，
-  但指向 2.0 返回 404 的路由）。新命令只读写 ZCode 的 provider 配置，不碰网络：
-  - `providers`：列出注册表里**全部** provider（含别人的），标出哪些属于已退役布局；
-  - `prune`：只删「id 是 `workbuddy-<region>-anthropic|responses` + `api.type` 仍是当初那个 +
-    baseUrl 是 loopback 同区域路径」三条同时成立的条目，其余跳过并报 `not_owned`。
 - **升级时自动清理**：`install` 也会删掉 1.4.x 留下的这两条 provider 及其 model 规则，
   并在报告的 `cleaned` 字段里列出。只有当那条 provider 的 `baseUrl` **精确等于**本桥这次写入的地址时
   才删——用户改到别的端口或自建端点的同名 provider 一律保留。`remove` 同样会扫这两种遗留条目。
-- 测试 66 个（删掉协议翻译与 Codex 的用例，新增遗留清理、离线 prune 与"用户改过就不动"等用例）。
+- 测试 62 个（删掉协议翻译与 Codex 的用例，新增遗留清理与"用户改过就不动"的用例）。
 
 ### Fixed
 
