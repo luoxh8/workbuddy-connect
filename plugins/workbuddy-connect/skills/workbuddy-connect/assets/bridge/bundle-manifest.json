@@ -27,7 +27,7 @@
     "src/smoke.ts": "cd78bc585f326240b29fc9e7434cefa815459c45809b30a44ddaecc7f236c937",
     "src/sse.ts": "8bf164e1c6e94dbd3fe9ee7bd727ab519cca789e8d4ce3c7a435e4dbb360d163",
     "src/storage.ts": "5838c127aaefa353d46ee864b74ccd71b8fb6b530886962b5a58ebe7c9725407",
-    "src/upstream.ts": "d943cee3d408f02938c557a1f9afa806923958780bad4b8e482058594cc9b18c",
+    "src/upstream.ts": "bfc36fbd37d48505ec5530dfa66cdf6c1b8395d76fd05d76b03e5a0c7d5a4e4c",
     "src/version.ts": "f22338037b3625ec9fa9ba3865d498a35fcfd72485b49a8f9fece8b726b38e93",
     "src/wbaes.ts": "e2322c8a0f3bf9bb7b58c3320f3fc385200f101d288cd577391c586bb6058264",
     "src/zcode.ts": "4b3e1a2005d9b717516e2c8a1df627c935f49d582281788e393b4373a7b0c58b"

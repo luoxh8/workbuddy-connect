@@ -10,6 +10,7 @@
 import type { WorkBuddyCredential } from './auth.ts'
 import type { ProbeAttempt } from './probe.ts'
 import { PROBE_MAX_TOKENS, PROBE_PROMPT } from './probe.ts'
+import { randomUUID } from 'node:crypto'
 
 /** WorkBuddy region selected by the credential's login domain. */
 export type WorkBuddyRegion = 'cn' | 'global'
@@ -286,6 +287,13 @@ function chatHeaders(credential: WorkBuddyCredential): Record<string, string> {
       : { 'X-Enterprise-Id': credential.enterpriseId },
     ...credential.domain === '' ? { 'X-No-Department-Info': '1' } : { 'X-Domain': credential.domain },
     'X-Product': 'SaaS',
+    // WorkBuddy upstream added channel verification: /v2/chat/completions
+    // rejects requests without per-call IDs (HTTP 400 code 11128). These
+    // mirror the official client's chat headers so the bridge stays compliant.
+    'X-Request-ID': randomUUID().replace(/-/gu, ''),
+    'X-Conversation-ID': randomUUID(),
+    'X-Conversation-Request-ID': randomUUID(),
+    'X-Conversation-Message-ID': randomUUID(),
   }
   return headers
 }
