@@ -1,6 +1,6 @@
 {
   "name": "workbuddy-connect",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Local WorkBuddy bridge: turns your own WorkBuddy desktop account models (free ones included) into one OpenAI Responses endpoint for ZCode, Codex CLI, and OpenCode",
   "type": "module",
   "bin": {

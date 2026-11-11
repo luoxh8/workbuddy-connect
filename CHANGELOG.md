@@ -2,6 +2,27 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.3.1] - 2026-11-12
+
+**上游的"请重新发送"拦截现在会自动重发。** 实测新版上游会间歇性地对本来合法的请求回
+`code: 11128`（"Illegal API invocation from an unapproved channel"），`displayMsg` 写的是
+「请求被拦截，请重新发送」。它是**建议重发**的反滥用暂停，不是对报文本身的判决；桥以前把它
+当成普通 400 直接失败，客户端整轮就废了。
+
+### Fixed
+
+- 桥对 11128 / "send it again" 类的 400 **自动重发最多 2 次**（400ms、800ms 退避），
+  其他 4xx 仍然一次就失败、不重试。判定在 `src/server.ts` 的 `isAdvisoryBlock()`。
+- 默认模型、请求体、工具集、上下文大小、并发、字段组合都能正常通过——已逐项实测，
+  说明触发条件在上游侧、与本桥的报文无关。
+
+### Added
+
+- **失败请求落到本地**：`serve` 启动时把状态目录传进桥，上游一拒绝就把请求体
+  （上限 8 MB）写到 `<state-dir>/last-rejected-request.json`，方便离线二分定位。
+  HTTP 响应仍然只回中性文案；不传状态目录（测试、内嵌）时这一步自动跳过。
+- 测试新增 1 个：11128 重发一次后成功（`calls === 2`），普通 400 只发一次（`calls === 1`）且不回显上游 body。
+
 ## [2.3.0] - 2026-11-11
 
 **新增 OpenCode 接入。** OpenCode V2 的 provider 配置是一个 JSON 文档，且自带

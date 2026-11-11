@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import { once } from 'node:events'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { hostIsLoopback, originIsLoopback } from './loopback.ts'
 import { prepareChatBody, normalizeCredits, WorkBuddyUpstreamClient, type WorkBuddyUpstreamModel, type WorkBuddyRegion } from './upstream.ts'
 import { CompletionAccumulator, readSse } from './sse.ts'
@@ -20,11 +22,48 @@ export interface BridgeOptions {
   stores: Record<Region, RegionStore>
   client?: Pick<WorkBuddyUpstreamClient, 'fetchModels' | 'chatStream' | 'fetchCredits'>
   timeoutMs?: number
+  /** Bridge home; when set, a rejected request body is kept here for offline triage. */
+  stateDir?: string
   /** 请求体整形参数；默认读 WORKBUDDY_SHAPE_* 环境变量。 */
   shape?: ShapeOptions
 }
 const errorStatus = { hard_credit: 402, soft_rate: 429, session_dead: 401, not_found: 404, server: 502, client: 400 }
 const MAX_BODY = 64 * 1024 * 1024
+/** Resends allowed after the upstream's advisory 11128 block. */
+const RESEND_ATTEMPTS = 2
+/** Base backoff for a resend; multiplied by the attempt number. */
+const RESEND_DELAY_MS = 400
+/** Ceiling for the request body kept beside a rejection, in bytes. */
+const CAPTURE_LIMIT = 8 * 1024 * 1024
+
+/**
+ * Whether an upstream rejection is the advisory "send it again" block rather
+ * than a verdict on the body. Measured 2026-11-12: `code: 11128`, message
+ * "Illegal API invocation from an unapproved channel", `displayMsg` asking the
+ * caller to resend. The same code also covers the `developer`-role rejection,
+ * which never reaches here (it is rewritten in `prepareChatBody`).
+ */
+function isAdvisoryBlock(result: { status: number; message?: string }): boolean {
+  if (result.status !== 400) return false
+  const message = String(result.message ?? '')
+  return /"code"\s*:\s*11128\b/u.test(message) || /send it again|重新发送|重新傳送/u.test(message)
+}
+
+/**
+ * Keep the last rejected request beside the bridge state so a payload-specific
+ * block can be bisected offline. Never surfaced over HTTP, and skipped when the
+ * caller supplies no state directory (tests, embedding).
+ */
+async function captureRejectedRequest(stateDir: string | undefined, record: Record<string, unknown>): Promise<void> {
+  try {
+    if (stateDir === undefined) return
+    const serialized = JSON.stringify(record)
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(join(stateDir, 'last-rejected-request.json'), serialized.length > CAPTURE_LIMIT ? serialized.slice(0, CAPTURE_LIMIT) : serialized, 'utf8')
+  } catch {
+    // Diagnosis is best-effort; a rejection must still reach the client.
+  }
+}
 
 /** The one wire protocol this bridge serves, in ZCode's `api.type` spelling. */
 export const PROTOCOL = 'openai-responses'
@@ -217,13 +256,29 @@ export function createBridge(options: BridgeOptions) {
       if (shaped.overBudget) {
         fail(res, 413, 'request_too_large', `Request is ${shaped.bytesOut} bytes after local image shaping, over this bridge's ${shapeOptions.maxBytes}-byte budget; send fewer images or raise WORKBUDDY_SHAPE_MAX_BYTES`); return
       }
-      const result = await client.chatStream(credential, prepareChatBody(JSON.stringify(chat)), controller.signal)
+      const prepared = prepareChatBody(JSON.stringify(chat))
+      let result = await client.chatStream(credential, prepared, controller.signal)
+      // The upstream sometimes answers 11128 ("Request blocked. Please send it
+      // again") for a request it would accept a moment later: that block is an
+      // advisory anti-abuse pause, not a defect in this body. Resending is the
+      // remedy the upstream itself prints, so do it here instead of failing the
+      // client's whole turn over it. Anything else is not retried.
+      for (let resend = 0; !result.ok && resend < RESEND_ATTEMPTS && isAdvisoryBlock(result); resend++) {
+        await new Promise(resolve => setTimeout(resolve, RESEND_DELAY_MS * (resend + 1)))
+        if (controller.signal.aborted) break
+        result = await client.chatStream(credential, prepared, controller.signal)
+      }
       if (!result.ok) {
         // The client keeps the vendor-neutral message (tests pin that no
         // upstream body leaks into an HTTP error). The operator-side detail
         // goes to this process's stderr, which the supervising task log keeps:
         // without it every 4xx looks identical and is unactionable.
-        console.error(`workbuddy-connect: upstream rejected ${region}/${String(body.model)} (${result.kind}, HTTP ${result.status}): ${String(result.message ?? '').replace(/\s+/gu, ' ').trim().slice(0, 300)}`)
+        const detail = String(result.message ?? '').replace(/\s+/gu, ' ').trim().slice(0, 300)
+        console.error(`workbuddy-connect: upstream rejected ${region}/${String(body.model)} (${result.kind}, HTTP ${result.status}): ${detail}`)
+        await captureRejectedRequest(options.stateDir, {
+          at: new Date().toISOString(), region, model: String(body.model),
+          kind: result.kind, status: result.status, upstream: detail, chat,
+        })
         fail(res, errorStatus[result.kind], result.kind, `WorkBuddy ${region} rejected the request (${result.kind}, HTTP ${result.status})`); return
       }
       if (!result.response.body || !result.response.headers.get('content-type')?.includes('text/event-stream')) {

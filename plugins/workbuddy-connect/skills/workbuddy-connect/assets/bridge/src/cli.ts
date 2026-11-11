@@ -260,7 +260,7 @@ export async function main(): Promise<void> {
   }
   if (command === 'serve') {
     const stores = storesFor(stateDir)
-    const bridge = createBridge({ token: config.token, port: config.port, stores, client: new WorkBuddyUpstreamClient() })
+    const bridge = createBridge({ token: config.token, port: config.port, stores, stateDir, client: new WorkBuddyUpstreamClient() })
     const url = await bridge.listen()
     await writeJsonAtomic(join(stateDir, 'runtime.json'), { pid: process.pid, url, startedAt: new Date().toISOString() })
     console.log(JSON.stringify({ service: 'workbuddy-connect', url, pid: process.pid }))

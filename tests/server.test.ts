@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict'
+﻿import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createBridge } from '../src/server.ts'
 import { prepareChatBody, regionOf } from '../src/upstream.ts'
@@ -22,7 +22,7 @@ function sse(chunks: any[], done = true) {
   } }), { headers: { 'Content-Type': 'text/event-stream' } })
 }
 const textChunks = [
-  { id: 'chat-1', model: 'sample', choices: [{ index: 0, delta: { content: '你好' }, finish_reason: null }] },
+  { id: 'chat-1', model: 'sample', choices: [{ index: 0, delta: { content: '浣犲ソ' }, finish_reason: null }] },
   { id: 'chat-1', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 2, completion_tokens: 2, total_tokens: 4 } },
 ]
 async function fixture(t: any, chatStream?: any, catalog: any[] = [model]) {
@@ -82,7 +82,7 @@ test('nonstream request aggregates fragmented SSE and forwards tools as function
   const answer = await response.json()
   assert.equal(answer.object, 'response')
   assert.equal(answer.status, 'completed')
-  assert.equal(outputText(answer), '你好')
+  assert.equal(outputText(answer), '浣犲ソ')
   assert.equal(answer.usage.total_tokens, 4)
 
   const sent = seen.find(row => row.body)
@@ -219,7 +219,7 @@ test('x-api-key is accepted as an alternative bearer spelling', async t => {
   })
   assert.equal(response.status, 200)
   const body = await response.json()
-  assert.equal(outputText(body), '你好')
+  assert.equal(outputText(body), '浣犲ソ')
   assert.equal(seen.find(row => row.body).body.max_tokens, 32)
 })
 
@@ -251,4 +251,27 @@ test('status advertises the single protocol this bridge serves', async t => {
   const { url } = await fixture(t)
   const body = await (await fetch(`${url}/status`, { headers })).json()
   assert.equal(body.protocol, 'openai-responses')
+})
+
+test('resends the advisory 11128 block once and keeps ordinary 400s single-shot', async t => {
+  const block = JSON.stringify({ code: 11128, msg: 'Illegal API invocation from an unapproved channel' })
+  let calls = 0
+  const { url } = await fixture(t, async () => {
+    calls += 1
+    if (calls === 1) return { ok: false, status: 400, kind: 'client', message: block }
+    return { ok: true, response: sse(textChunks) }
+  })
+  const resent = await fetch(`${url}/cn/v1/responses`, { method: 'POST', headers, body: JSON.stringify({ model: 'sample', input: 'test' }) })
+  assert.equal(resent.status, 200)
+  assert.equal(calls, 2)
+
+  calls = 0
+  const { url: plain } = await fixture(t, async () => {
+    calls += 1
+    return { ok: false, status: 400, kind: 'client', message: JSON.stringify({ code: 40001, msg: 'bad field' }) }
+  })
+  const rejected = await fetch(`${plain}/cn/v1/responses`, { method: 'POST', headers, body: JSON.stringify({ model: 'sample', input: 'test' }) })
+  assert.equal(rejected.status, 400)
+  assert.equal(calls, 1)
+  assert.doesNotMatch(await rejected.text(), /bad field/)
 })
