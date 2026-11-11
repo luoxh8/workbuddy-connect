@@ -2,6 +2,39 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.3.0] - 2026-11-11
+
+**新增 OpenCode 接入。** OpenCode V2 的 provider 配置是一个 JSON 文档，且自带
+`@opencode/ai/providers/openai-compatible/responses` 包，正好对上本桥唯一支持的协议，
+所以不需要适配层，也不需要像 Codex 那样合并目录。
+
+### Added
+
+- **`install-opencode` / `remove-opencode`**（`src/opencode.ts`）：注册
+  `providers.workbuddy`（国际版 `workbuddy-global`），默认写
+  `$XDG_CONFIG_HOME/opencode/opencode.json`，没有就写 `~/.config/opencode/opencode.json`；
+  `--opencode-config` 可指定，`--free-only` 只放倍率 x0.00 的模型。
+- 模型条目按桥的 `/v1/models` 生成：名称、上下文窗口、图像输入、`capabilities.reasoning`
+  的 `effort`（OpenCode 据此生成 `#low` / `#high` / `#max` 变体），免费模型由 `billing.free` 判定。
+- 只拥有自己那个键：MCP 服务器、agent、插件、根 `model` 全部原样保留；`$schema` 缺了就补上。
+- JSONC 支持：只存在 `opencode.jsonc` 时改那个文件（注释与尾逗号会在重写时丢弃，终端提示一次）。
+- 幂等：内容没变化时报告 `unchanged` 且不写盘；`remove-opencode` 只在 `package` 与
+  `baseURL` 仍指向本桥时才删，用户改过的条目报 `not_owned` 并跳过。
+- 测试新增 11 个（`tests/opencode.test.ts`），总数 92。
+
+### Changed
+
+- 上游拒绝时（4xx/5xx）把**上游原文**（截断 300 字）写进桥自己的 stderr，由计划任务的
+  supervisor 日志留存。HTTP 响应仍保持原来那句中性文案——有测试专门钉住"不把上游 body
+  回给客户端"，所以排查信息只落在操作者侧，不外泄给客户端。
+
+### Verified on this machine (2026-11-11)
+
+- `install-opencode --region cn` → 16 个模型、2 个免费（`hy3`、`hy4free`），剩余积分 937
+- `opencode models` 列出 `workbuddy/*` 全部 16 个
+- `opencode run -m workbuddy/hy4free "…"` → 真实回复（免费模型，不扣积分）
+- 桥接由计划任务 `WorkBuddy Bridge-<hash>` 托管，登录自启，`/healthz` 正常
+
 ## [2.2.0] - 2026-10-24
 
 **协议定为 OpenAI Responses。** 2.0 把三协议砍成一种时选了 Chat Completions，理由是"最通用"；

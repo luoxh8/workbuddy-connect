@@ -72,7 +72,11 @@ export function usage(program = programName()): string {
     '                        without the bridge running',
     '  install-codex         register this bridge in ~/.codex/config.toml (Codex CLI',
     '                        and the ChatGPT desktop app share that file)',
-    '  remove-codex          undo install-codex, keeping unrelated providers',    '  smoke                 one real call through the bridge (spends credits).',
+    '  remove-codex          undo install-codex, keeping unrelated providers',
+    '  install-opencode      register this bridge as an OpenCode provider',
+    '                        (~/.config/opencode/opencode.json)',
+    '  remove-opencode       undo install-opencode, keeping unrelated providers',
+    '  smoke                 one real call through the bridge (spends credits).',
     '                        Requires --region cn|global --model ID',
     '',
     'The bridge serves one wire protocol only: OpenAI Responses',
@@ -88,6 +92,8 @@ export function usage(program = programName()): string {
     '  --config <path>                  ZCode provider config to edit',
     '  --codex-config <path>            Codex config (default: $CODEX_HOME or',
     '                                   ~/.codex/config.toml)',
+    '  --opencode-config <path>         OpenCode config (default: $XDG_CONFIG_HOME or',
+    '                                   ~/.config/opencode/opencode.json)',
     '  --free-only                      install: register only free (x0.00) models',
     '  --keep-default                   install-codex: add the provider and catalog but',
     '                                   leave model/model_provider pointing where they',
@@ -103,6 +109,7 @@ function initializeArguments(): void {
       'state-dir': { type: 'string' }, port: { type: 'string' }, region: { type: 'string' },
       model: { type: 'string' }, prompt: { type: 'string' }, config: { type: 'string' },
       'codex-config': { type: 'string' }, 'codex-catalog': { type: 'string' },
+      'opencode-config': { type: 'string' },
       'free-only': { type: 'boolean' }, 'keep-default': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }, version: { type: 'boolean', short: 'v' },
     } })
@@ -318,6 +325,31 @@ export async function main(): Promise<void> {
     // Codex reads one catalog file; name it so the merge note is actionable.
     console.error(`codex config: ${configPath}`)
     console.error('restart the ChatGPT desktop app (or start a new codex session) to pick up the change')
+    return
+  }
+  if (command === 'install-opencode') {
+    const regions = await selectedInstallRegions(regionChoice)
+    const { defaultOpenCodeConfigPath, installOpenCode } = await import('./opencode.ts')
+    const configPath = args.values['opencode-config'] ?? defaultOpenCodeConfigPath()
+    const reports = await installOpenCode({
+      bridgeUrl: baseUrl, token: config.token, regions,
+      ...args.values['opencode-config'] === undefined ? {} : { configPath: args.values['opencode-config'] },
+      ...args.values['free-only'] === true ? { freeOnly: true } : {},
+    })
+    console.log(JSON.stringify(reports, null, 2))
+    // OpenCode reloads configuration by itself; name the file it will reread.
+    console.error(`opencode config: ${configPath}`)
+    console.error('pick a model in /models under "WorkBuddy"; re-run install-opencode when the account gains models')
+    return
+  }
+  if (command === 'remove-opencode') {
+    const { removeOpenCode } = await import('./opencode.ts')
+    const reports = await removeOpenCode({
+      bridgeUrl: baseUrl, regions: regionsOf(regionChoice),
+      ...args.values['opencode-config'] === undefined ? {} : { configPath: args.values['opencode-config'] },
+    })
+    console.log(JSON.stringify(reports, null, 2))
+    if (reports.some(report => report.action === 'skipped' && report.reason === 'not_owned')) process.exitCode = 2
     return
   }
   if (command === 'remove-codex') {

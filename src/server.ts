@@ -219,6 +219,11 @@ export function createBridge(options: BridgeOptions) {
       }
       const result = await client.chatStream(credential, prepareChatBody(JSON.stringify(chat)), controller.signal)
       if (!result.ok) {
+        // The client keeps the vendor-neutral message (tests pin that no
+        // upstream body leaks into an HTTP error). The operator-side detail
+        // goes to this process's stderr, which the supervising task log keeps:
+        // without it every 4xx looks identical and is unactionable.
+        console.error(`workbuddy-connect: upstream rejected ${region}/${String(body.model)} (${result.kind}, HTTP ${result.status}): ${String(result.message ?? '').replace(/\s+/gu, ' ').trim().slice(0, 300)}`)
         fail(res, errorStatus[result.kind], result.kind, `WorkBuddy ${region} rejected the request (${result.kind}, HTTP ${result.status})`); return
       }
       if (!result.response.body || !result.response.headers.get('content-type')?.includes('text/event-stream')) {

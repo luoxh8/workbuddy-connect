@@ -28,9 +28,10 @@ ZCode 的 `api.type = "openai-responses"`，Codex CLI 的 `wire_api = "responses
 
 - **ZCode** —— `install`，注册为 `openai-responses` provider
 - **ChatGPT 桌面版 / Codex CLI** —— `install-codex`，见对应章节
+- **OpenCode** —— `install-opencode`，写入 `~/.config/opencode/opencode.json`
 
 ```text
-ZCode / Codex / 任意 Responses 客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
+ZCode / Codex / OpenCode / 任意 Responses 客户端 → 本机 WorkBuddy Bridge (127.0.0.1:10108) → 你自己的 WorkBuddy 账号
                                         ├─ WorkBuddy CN/模型名称
                                         └─ WorkBuddy Global/模型名称
 ```
@@ -153,7 +154,6 @@ node src/cli.ts install-codex --region cn --free-only   # 只放免费模型
 node src/cli.ts install-codex --region both             # 国内 + 国际
 node src/cli.ts remove-codex                            # 撤回，逐字节还原 config.toml
 ```
-
 自定义位置：`--codex-config <path>`、`--codex-catalog <path>`；默认跟随 `$CODEX_HOME`。
 
 **不覆盖你已有的模型目录**：Codex 只能读一个目录文件。如果 `config.toml` 里的
@@ -163,6 +163,49 @@ node src/cli.ts remove-codex                            # 撤回，逐字节还�
 `remove-codex` 会连 `model` / `model_provider` / `model_catalog_json` 一起还原成安装前的值
 （块内 `# restore` 注释记录了原始根键），并删掉自己生成的目录文件。
 
+
+## 接入 OpenCode
+
+OpenCode 只要一个配置文件，所以没有"目录合并"这类麻烦：
+
+```powershell
+node src/cli.ts install-opencode --region cn
+# 装成 npm 包后：workbuddy-connect install-opencode --region cn
+```
+
+它只动 `providers.workbuddy`（国际版是 `providers.workbuddy-global`）这一个键，MCP 服务器、
+agent、插件、你设的默认 `model` 一律原样保留；默认写
+`$XDG_CONFIG_HOME/opencode/opencode.json`，没设就是 `~/.config/opencode/opencode.json`
+（只存在 `opencode.jsonc` 时改那个文件，注释和尾逗号会在重写时丢掉，终端会提示一次）。
+自定义位置用 `--opencode-config <path>`。
+
+写入的内容：
+
+```jsonc
+{
+  "providers": {
+    "workbuddy": {
+      "name": "WorkBuddy CN",
+      "package": "@opencode/ai/providers/openai-compatible/responses",  // 桥只讲 Responses
+      "settings": { "baseURL": "http://127.0.0.1:10108/cn/v1", "apiKey": "<桥的本地密钥>" },
+      "models": { "hy3": { "capabilities": { … }, "limit": { … } } }
+    }
+  }
+}
+```
+
+- 桥的本地密钥自动从 `bridge.json` 取，不用手抄；**别把这份 config 提交或分享**。
+- 模型名、上下文窗口、图像输入、推理档位都按 `/v1/models` 写；模型多起来后重跑一次
+  `install-opencode` 就同步，`remove-opencode` 只删自己写的那条。
+- OpenCode 会自动重载配置，不用重启；在 `/models` 里选 `workbuddy/<模型>` 即可，推理档位是
+  `#low` / `#high` / `#max` 这类变体，例如 `workbuddy/glm-5.3#max`。
+- 免费模型（`billing.free`，倍率 `x0.00`）想先试水：`install-opencode --region cn --free-only`。
+
+验证（`hy3` 限额免费，不扣积分）：
+
+```powershell
+opencode run --model workbuddy/hy3 "Reply with exactly: bridge ok"
+```
 
 ## 日常使用
 
@@ -175,6 +218,8 @@ node src/cli.ts models --region cn                # 模型目录（含免费标�
 node src/cli.ts install --region cn               # 注册/刷新 provider（可重复运行）
 node src/cli.ts install --region cn --free-only   # 只注册免费模型
 node src/cli.ts remove --region cn                # 只移除本桥接注册的 provider
+node src/cli.ts install-opencode --region cn      # 注册/刷新 OpenCode provider
+node src/cli.ts remove-opencode --region cn       # 只移除本桥接写的 OpenCode provider
 node src/cli.ts providers                         # 列出 ZCode 注册表里的全部 provider（只读）
 node src/cli.ts prune                             # 删掉 1.4.x 遗留的 anthropic/responses 条目
 ```
@@ -316,6 +361,7 @@ node src/cli.ts status
 
 ```powershell
 node src/cli.ts remove --region both        # 或双击 Uninstall.cmd
+node src/cli.ts remove-opencode --region both   # OpenCode 侧单独撤（也可先跑这个）
 ```
 
 它会移除本桥接注册的 provider、停止桥接、删掉计划任务与启动快捷方式，保留你自己的其他
